@@ -1,34 +1,28 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    // 开发任务：禁用缓存，标记为持久化进程
     "dev": {
       "cache": false,
       "persistent": true
     },
-    // 构建任务：依赖于所有上游依赖包的构建完成
     "build": {
       "dependsOn": [
         "^build"
       ],
-      // 构建产物目录，会被 Turborepo 缓存
       "outputs": [
         "dist/**",
         ".next/**"
       ]
     },
-    // 类型检查任务：确保依赖包已构建
     "typecheck": {
       "dependsOn": [
         "^build"
       ],
       "outputs": []
     },
-    // 代码规范检查
     "lint": {
       "outputs": []
     },
-    // 测试任务
     "test": {
       "dependsOn": [
         "^build"

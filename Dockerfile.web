@@ -8,6 +8,8 @@ RUN bun install --frozen-lockfile
 FROM oven/bun:1 AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG API_ORIGIN=http://localhost:3001
+ENV API_ORIGIN=$API_ORIGIN
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN bun run --filter @repo/contracts build \
@@ -18,9 +20,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-# standalone 产物（含最小化 node_modules）
 COPY --from=build /app/clients/web/.next/standalone ./
-# 静态资源需要单独拷贝到 standalone 对应位置
 COPY --from=build /app/clients/web/.next/static ./clients/web/.next/static
 COPY --from=build /app/clients/web/public ./clients/web/public
 EXPOSE 3000

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   api:
     build:
@@ -9,15 +7,17 @@ services:
     ports:
       - "3001:3001"
     healthcheck:
-      test: \["CMD", "wget", "-qO-",
-        "[http://localhost:3001/health](http://localhost:3001/health)"\]
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3001/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
+
   web:
     build:
       context: ../..
       dockerfile: Dockerfile.web
+      args:
+        API_ORIGIN: http://api:3001
     container_name: repo-web
     ports:
       - "3000:3000"

@@ -1,6 +1,3 @@
 [install]
-# 使用 "isolated" 模式（类似于 pnpm），通过符号链接管理依赖，防止幽灵依赖问题，是 Monorepo 的推荐配置
 linker = "isolated"
-
-# 显式开启 Bun 的工作区（Workspaces）支持，允许管理多个子包
 workspaces = true
