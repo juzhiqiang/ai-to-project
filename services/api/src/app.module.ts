@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [],
+  imports: [LlmModule],
   controllers: [AppController],
   providers: [],
 })

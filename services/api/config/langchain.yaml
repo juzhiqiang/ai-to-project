@@ -1,0 +1,10 @@
+llm:
+  model: gpt-4o-mini
+  temperature: 0
+  maxTokens: 1024
+retrieval:
+  topK: 5
+tools:
+  extraction: true
+features:
+  streaming: true
