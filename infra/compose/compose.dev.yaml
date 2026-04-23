@@ -1,13 +1,26 @@
 services:
   api:
+    build:
+      target: build
     environment:
       NODE_ENV: development
+    working_dir: /app/services/api
+    command: ["bun", "--watch", "src/main.ts"]
     volumes:
       - ../../services/api:/app/services/api
+      - /app/services/api/node_modules
       - ../../packages/contracts:/app/packages/contracts
+      - /app/packages/contracts/node_modules
   web:
+    build:
+      target: base
     environment:
       NODE_ENV: development
+      API_ORIGIN: http://api:3001
+    working_dir: /app/clients/web
+    command: ["bun", "--bun", "next", "dev", "--hostname", "0.0.0.0", "--port", "3000"]
     volumes:
       - ../../clients/web:/app/clients/web
+      - /app/clients/web/node_modules
       - ../../packages/contracts:/app/packages/contracts
+      - /app/packages/contracts/node_modules

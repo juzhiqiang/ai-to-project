@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: Dockerfile.api
+      dockerfile: infra/compose/Dockerfile.api
     container_name: repo-api
     ports:
       - "3001:3001"
@@ -15,7 +15,7 @@ services:
   web:
     build:
       context: ../..
-      dockerfile: Dockerfile.web
+      dockerfile: infra/compose/Dockerfile.web
       args:
         API_ORIGIN: http://api:3001
     container_name: repo-web
