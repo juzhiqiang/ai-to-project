@@ -1,0 +1,34 @@
+{
+  "name": "@repo/root",
+  "private": true,
+  "packageManager": "bun@1.3.11",
+  "workspaces": {
+    "packages": [
+      "clients/*",
+      "services/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "typescript": "^5.8.0",
+      "zod": "^3.25.0"
+    },
+    "catalogs": {
+      "react": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel --filter=@repo/web --filter=@repo/api",
+    "dev:web": "turbo run dev --filter=@repo/web",
+    "dev:api": "turbo run dev --filter=@repo/api",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}
