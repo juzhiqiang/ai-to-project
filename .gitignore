@@ -1,1 +1,22 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+.next/
+
+# Turborepo cache
+.turbo/
+
+# Bun cache
+.bun/
+
+# Environment variables (sensitive data)
+.env
+.env.local
+.env.*
+.env.production
+.env.development
+
+# Logs
+*.log
