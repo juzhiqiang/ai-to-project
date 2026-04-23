@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../../services/api:/app/services/api
+      - ../../packages/contracts:/app/packages/contracts
+  web:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../../clients/web:/app/clients/web
+      - ../../packages/contracts:/app/packages/contracts

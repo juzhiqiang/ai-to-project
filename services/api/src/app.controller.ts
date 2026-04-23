@@ -1,20 +1,18 @@
 import { Controller, Get } from '@nestjs/common';
-import { HealthResponse, HelloResponse } from '@repo/contracts';
+import { AppService } from './app.service';
+import { APP_NAME } from '@repo/contracts';
 
 @Controller()
 export class AppController {
-  @Get('health')
-  getHealth(): HealthResponse {
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-    };
-  }
+  constructor(private readonly appService: AppService) { }
 
-  @Get('hello')
-  getHello(): HelloResponse {
-    return {
-      message: 'Hello from NestJS API!',
-    };
+  @Get("/health")
+  health() {
+    return { ok: true };
+  }
+  @Get("/hello")
+  hello() {
+    return { message: `Hello from API, shared APP_NAME=${APP_NAME}` };
   }
 }
+

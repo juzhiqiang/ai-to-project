@@ -1,0 +1,24 @@
+FROM oven/bun:1 AS deps
+WORKDIR /app
+COPY package.json bun.lock bunfig.toml turbo.json tsconfig.base.json ./
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY services/api/package.json services/api/package.json
+RUN bun install --frozen-lockfile
+
+FROM oven/bun:1 AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN bun run --filter @repo/contracts build \
+ && bun run --filter @repo/api build
+
+FROM oven/bun:1 AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/contracts ./packages/contracts
+COPY --from=build /app/services/api ./services/api
+COPY --from=build /app/package.json ./package.json
+EXPOSE 3001
+WORKDIR /app/services/api
+CMD ["bun", "run", "dist/main.js"]
