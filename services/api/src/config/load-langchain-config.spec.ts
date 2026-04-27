@@ -29,15 +29,19 @@ describe('loadLangChainConfig', () => {
       configPath,
       [
         'llm:',
-        '  model: gpt-4o-mini',
-        '  temperature: 0.2',
-        '  maxTokens: 256',
+        '  provider: openai',
+        '  model: ep-wle31i-1770351442334904533',
+        '  temperature: 0',
+        '  maxTokens: 4096',
         'retrieval:',
-        '  topK: 4',
+        '  enabled: true',
+        '  topK: 5',
         'tools:',
-        '  extraction: true',
+        '  enableConstraintCheck: true',
+        '  enableEntityLookup: true',
         'features:',
-        '  streaming: true',
+        '  enableStructuredOutput: true',
+        '  enableStreaming: true',
       ].join('\n'),
       'utf8',
     );
@@ -46,29 +50,38 @@ describe('loadLangChainConfig', () => {
 
     expect(config).toEqual({
       llm: {
-        model: 'gpt-4o-mini',
-        temperature: 0.2,
-        maxTokens: 256,
+        provider: 'openai',
+        model: 'ep-wle31i-1770351442334904533',
+        temperature: 0,
+        maxTokens: 4096,
       },
       retrieval: {
-        topK: 4,
+        enabled: true,
+        topK: 5,
       },
       tools: {
-        extraction: true,
+        enableConstraintCheck: true,
+        enableEntityLookup: true,
       },
       features: {
-        streaming: true,
+        enableStructuredOutput: true,
+        enableStreaming: true,
       },
     });
   });
 
-  it('throws when required llm.model is missing', () => {
+  it.each([
+    ['provider', ['llm:', '  model: test-model', '  temperature: 0', '  maxTokens: 4096']],
+    ['model', ['llm:', '  provider: openai', '  temperature: 0', '  maxTokens: 4096']],
+    ['temperature', ['llm:', '  provider: openai', '  model: test-model', '  maxTokens: 4096']],
+    ['maxTokens', ['llm:', '  provider: openai', '  model: test-model', '  temperature: 0']],
+  ])('throws when required llm.%s is missing', (field, lines) => {
     writeFileSync(
       configPath,
-      ['llm:', '  temperature: 0.2', 'retrieval: {}', 'tools: {}', 'features: {}'].join('\n'),
+      [...lines, 'retrieval: {}', 'tools: {}', 'features: {}'].join('\n'),
       'utf8',
     );
 
-    expect(() => loadLangChainConfig()).toThrow('config.langchain.llm.model is required');
+    expect(() => loadLangChainConfig()).toThrow(`config.langchain.llm.${field} is required`);
   });
 });

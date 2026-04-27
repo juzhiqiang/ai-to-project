@@ -12,5 +12,6 @@ import { CHAT_MODEL_FACTORY, createChatModel } from './model.factory';
       useValue: createChatModel,
     },
   ],
+  exports: [LlmService],
 })
-export class LlmModule {}
+export class LlmModule { }

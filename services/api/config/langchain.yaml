@@ -1,10 +1,14 @@
 llm:
-  model: gpt-4o-mini
+  provider: openai
+  model: ep-wle31i-1770351442334904533
   temperature: 0
-  maxTokens: 1024
+  maxTokens: 4096
 retrieval:
+  enabled: true
   topK: 5
 tools:
-  extraction: true
+  enableConstraintCheck: true
+  enableEntityLookup: true
 features:
-  streaming: true
+  enableStructuredOutput: true
+  enableStreaming: true

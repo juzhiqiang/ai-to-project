@@ -1,8 +1,10 @@
 import { PassThrough } from 'node:stream';
 import type { Response } from 'express';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { RunnableLambda } from '@langchain/core/runnables';
 import { LlmService } from './llm.service';
 import type { ChatModelLike } from './model.factory';
+import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
 
 class FakeChatModel implements ChatModelLike {
   public readonly invoke = jest.fn(async (messages: unknown[]) => ({
@@ -42,6 +44,23 @@ const createResponse = () => {
   return { response, getBody: () => body };
 };
 
+const TEST_INPUT = '用户注册时必须绑定手机号，密码至少8位';
+
+function createRunnableChatModel() {
+  const seenMessages: BaseMessage[][] = [];
+  const model = RunnableLambda.from(async (promptValue: { toChatMessages: () => BaseMessage[] }) => {
+    const messages = promptValue.toChatMessages();
+    seenMessages.push(messages);
+
+    return new AIMessage(`chain:${messages.length}:${messages[1].content}`);
+  });
+
+  return {
+    model: model as unknown as ChatModelLike,
+    seenMessages,
+  };
+}
+
 describe('LlmService', () => {
   let service: LlmService;
   let model: FakeChatModel;
@@ -58,9 +77,42 @@ describe('LlmService', () => {
 
     const [messages] = model.invoke.mock.calls[0];
     expect(messages[0]).toBeInstanceOf(SystemMessage);
-    expect((messages[0] as SystemMessage).content).toBe('需求结构化抽取助手');
+    expect((messages[0] as SystemMessage).content).toBe(REQUIREMENT_SYSTEM_PROMPT);
+    expect((messages[0] as SystemMessage).content).toContain('action');
+    expect((messages[0] as SystemMessage).content).toContain('constraints');
+    expect((messages[0] as SystemMessage).content).toContain('entities');
     expect(messages[1]).toBeInstanceOf(HumanMessage);
-    expect((messages[1] as HumanMessage).content).toBe('整理这段需求');
+    expect((messages[1] as HumanMessage).content).toContain('整理这段需求');
+  });
+
+  it('renders requirement prompt preview without invoking the model', async () => {
+    const result = await service.promptPreview({ input: TEST_INPUT });
+
+    expect(result).toEqual({
+      messages: [
+        {
+          type: 'system',
+          content: REQUIREMENT_SYSTEM_PROMPT,
+        },
+        {
+          type: 'human',
+          content: expect.stringContaining(TEST_INPUT),
+        },
+      ],
+    });
+    expect(model.invoke).not.toHaveBeenCalled();
+  });
+
+  it('formats requirement prompt before invoking the model', async () => {
+    const result = await service.promptToModel({ input: TEST_INPUT });
+
+    expect(result).toEqual({ content: 'invoke:2' });
+
+    const [messages] = model.invoke.mock.calls[0];
+    expect(messages[0]).toBeInstanceOf(SystemMessage);
+    expect((messages[0] as SystemMessage).content).toBe(REQUIREMENT_SYSTEM_PROMPT);
+    expect(messages[1]).toBeInstanceOf(HumanMessage);
+    expect((messages[1] as HumanMessage).content).toContain(TEST_INPUT);
   });
 
   it('writes streaming chunks as server-sent events', async () => {
@@ -84,5 +136,41 @@ describe('LlmService', () => {
       results: ['batch:0:2', 'batch:1:2'],
     });
     expect(model.batch).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the requirement chain in invoke mode', async () => {
+    const { model, seenMessages } = createRunnableChatModel();
+    service = new LlmService(() => model);
+
+    const result = await service.chainInvoke({ input: TEST_INPUT });
+
+    expect(result.content).toContain(`chain:2:`);
+    expect(result.content).toContain(TEST_INPUT);
+    expect(seenMessages[0][0].content).toBe(REQUIREMENT_SYSTEM_PROMPT);
+  });
+
+  it('streams the requirement chain as server-sent events', async () => {
+    const { model } = createRunnableChatModel();
+    service = new LlmService(() => model);
+    const { response, getBody } = createResponse();
+
+    await service.chainStream({ input: TEST_INPUT }, response);
+
+    expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream; charset=utf-8');
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-transform');
+    expect(response.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive');
+    expect(getBody()).toContain('data: {"content":"chain:2:');
+    expect(getBody()).toContain(TEST_INPUT);
+  });
+
+  it('runs the requirement chain in batch mode', async () => {
+    const { model } = createRunnableChatModel();
+    service = new LlmService(() => model);
+
+    const result = await service.chainBatch({ inputs: [TEST_INPUT, '用户登录时必须输入验证码'] });
+
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toContain(TEST_INPUT);
+    expect(result.results[1]).toContain('用户登录时必须输入验证码');
   });
 });
