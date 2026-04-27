@@ -7,10 +7,14 @@ import {
   type RequirementChainBatchDto,
   type RequirementPromptDto,
 } from './llm.service';
+import { RequirementService } from './requirement.service';
 
 @Controller('api/langchain')
 export class LlmController {
-  constructor(private readonly llmService: LlmService) {}
+  constructor(
+    private readonly llmService: LlmService,
+    private readonly requirementService: RequirementService,
+  ) {}
 
   @Post('invoke')
   invoke(@Body() body: InvokeLlmDto) {
@@ -50,5 +54,10 @@ export class LlmController {
   @Post('chain-batch')
   chainBatch(@Body() body: RequirementChainBatchDto) {
     return this.llmService.chainBatch(body);
+  }
+
+  @Post('structured')
+  structured(@Body() body: RequirementPromptDto) {
+    return this.requirementService.extract(body.input);
   }
 }

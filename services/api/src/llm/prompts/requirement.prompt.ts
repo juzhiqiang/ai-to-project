@@ -11,7 +11,7 @@ export const REQUIREMENT_SYSTEM_PROMPT = `
 4. entities 只提取文本中真实出现的名词
 5. 如果不存在某字段，返回空数组
 
-输出必须符合 schema，不要输出解释
+输出必须是合法 JSON，且符合 schema，不要输出解释
 `.trim();
 
 export const REQUIREMENT_USER_TEMPLATE = `

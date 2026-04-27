@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import { LlmController } from './llm.controller';
 import type { LlmService } from './llm.service';
+import type { RequirementService } from './requirement.service';
 
 describe('LlmController', () => {
   const service = {
@@ -14,7 +15,15 @@ describe('LlmController', () => {
     chainBatch: jest.fn(async () => ({ results: ['from-chain'] })),
   } as unknown as LlmService;
 
-  const controller = new LlmController(service);
+  const requirementService = {
+    extract: jest.fn(async () => ({
+      action: ['绑定手机号'],
+      constraints: ['必须绑定手机号', '密码至少8位'],
+      entities: ['用户注册', '手机号', '密码'],
+    })),
+  } as unknown as RequirementService;
+
+  const controller = new LlmController(service, requirementService);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -64,5 +73,14 @@ describe('LlmController', () => {
   it('delegates chain batch to the service', async () => {
     await expect(controller.chainBatch({ inputs: ['hello'] })).resolves.toEqual({ results: ['from-chain'] });
     expect(service.chainBatch).toHaveBeenCalledWith({ inputs: ['hello'] });
+  });
+
+  it('delegates structured extraction to the requirement service', async () => {
+    await expect(controller.structured({ input: 'hello' })).resolves.toEqual({
+      action: ['绑定手机号'],
+      constraints: ['必须绑定手机号', '密码至少8位'],
+      entities: ['用户注册', '手机号', '密码'],
+    });
+    expect(requirementService.extract).toHaveBeenCalledWith('hello');
   });
 });
