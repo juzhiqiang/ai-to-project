@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import request = require('supertest');
 import { AppModule } from '../../../src/app.module';
+import { VectorStoreService } from '../../../src/llm/embedding/vector-store.service';
 import { RunnableMemoryService } from '../../../src/llm/memory/runnable-memory.service';
 
 const CHAT_RESULT = {
@@ -29,6 +30,8 @@ describe('MemoryController', () => {
     })
       .overrideProvider(RunnableMemoryService)
       .useValue(memoryService)
+      .overrideProvider(VectorStoreService)
+      .useValue({ addDocuments: jest.fn(), similaritySearch: jest.fn() })
       .compile();
     const app = moduleRef.createNestApplication();
     await app.init();

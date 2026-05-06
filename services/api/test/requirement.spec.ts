@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request = require('supertest');
 import { AppModule } from '../src/app.module';
+import { VectorStoreService } from '../src/llm/embedding/vector-store.service';
 import { RequirementService } from '../src/llm/requirement.service';
 
 const INPUT = '用户注册时必须绑定手机号，密码至少8位';
@@ -25,6 +26,8 @@ describe('Requirement extraction endpoint', () => {
     })
       .overrideProvider(RequirementService)
       .useValue(requirementService)
+      .overrideProvider(VectorStoreService)
+      .useValue({ addDocuments: jest.fn(), similaritySearch: jest.fn() })
       .compile();
 
     app = moduleRef.createNestApplication();

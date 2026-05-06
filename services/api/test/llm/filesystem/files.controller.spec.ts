@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import request = require('supertest');
 import { AppModule } from '../../../src/app.module';
+import { VectorStoreService } from '../../../src/llm/embedding/vector-store.service';
 import { FilesystemService } from '../../../src/llm/filesystem/filesystem.service';
 
 const FILE_CHAT_RESULT = {
@@ -24,6 +25,8 @@ describe('FilesController', () => {
     })
       .overrideProvider(FilesystemService)
       .useValue(filesystemService)
+      .overrideProvider(VectorStoreService)
+      .useValue({ addDocuments: jest.fn(), similaritySearch: jest.fn() })
       .compile();
     const app = moduleRef.createNestApplication();
     await app.init();

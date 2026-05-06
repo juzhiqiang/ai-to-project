@@ -1,13 +1,32 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { businessTools } from '../../../src/llm/tools/business.tools';
 
 const workspaceRoot = join(process.cwd(), 'workspace');
+const workspaceBackupRoot = join(process.cwd(), '.test-workspace-backup-business-tools');
+const rmOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 };
 const orderId = 'EC20240315001';
 const productId = 'P-BT-001';
 
+function backupWorkspace() {
+  rmSync(workspaceBackupRoot, rmOptions);
+
+  if (existsSync(workspaceRoot)) {
+    cpSync(workspaceRoot, workspaceBackupRoot, { recursive: true });
+  }
+}
+
+function restoreWorkspace() {
+  rmSync(workspaceRoot, rmOptions);
+
+  if (existsSync(workspaceBackupRoot)) {
+    cpSync(workspaceBackupRoot, workspaceRoot, { recursive: true });
+    rmSync(workspaceBackupRoot, rmOptions);
+  }
+}
+
 function resetWorkspace() {
-  rmSync(workspaceRoot, { recursive: true, force: true });
+  rmSync(workspaceRoot, rmOptions);
   mkdirSync(join(workspaceRoot, 'orders'), { recursive: true });
   mkdirSync(join(workspaceRoot, 'products'), { recursive: true });
   mkdirSync(join(workspaceRoot, 'policies'), { recursive: true });
@@ -34,11 +53,12 @@ function resetWorkspace() {
 }
 
 describe('businessTools', () => {
-  beforeEach(resetWorkspace);
-
-  afterAll(() => {
-    rmSync(workspaceRoot, { recursive: true, force: true });
+  beforeEach(() => {
+    backupWorkspace();
+    resetWorkspace();
   });
+
+  afterEach(restoreWorkspace);
 
   it('defines order, product, read, and write tools', () => {
     expect(businessTools.map((item) => item.name)).toEqual([
