@@ -1,6 +1,6 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadLangChainConfig } from './load-langchain-config';
+import { loadLangChainConfig } from '../../src/config/load-langchain-config';
 
 const configPath = join(process.cwd(), 'config', 'langchain.yaml');
 

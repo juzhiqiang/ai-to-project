@@ -1,4 +1,4 @@
-import { basicTools } from './basic.tools';
+import { basicTools } from '../../../src/llm/tools/basic.tools';
 
 describe('basicTools', () => {
   it('defines the expected requirement tools', () => {

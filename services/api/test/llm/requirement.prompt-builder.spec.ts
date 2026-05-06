@@ -1,6 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { buildRequirementPromptTemplate } from './requirement.prompt-builder';
-import { REQUIREMENT_SYSTEM_PROMPT, REQUIREMENT_USER_TEMPLATE } from './prompts/requirement.prompt';
+import { buildRequirementPromptTemplate } from '../../src/llm/requirement.prompt-builder';
+import { REQUIREMENT_SYSTEM_PROMPT, REQUIREMENT_USER_TEMPLATE } from '../../src/llm/prompts/requirement.prompt';
 
 const TEST_INPUT = '用户注册时必须绑定手机号，密码至少8位';
 

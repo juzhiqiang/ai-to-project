@@ -1,7 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { RunnableLambda } from '@langchain/core/runnables';
-import { requirementChain } from './requirement.chain';
-import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
+import { requirementChain } from '../../src/llm/requirement.chain';
+import { REQUIREMENT_SYSTEM_PROMPT } from '../../src/llm/prompts/requirement.prompt';
 
 const TEST_INPUT = '用户注册时必须绑定手机号，密码至少8位';
 

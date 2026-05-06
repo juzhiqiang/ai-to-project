@@ -2,10 +2,10 @@ import { PassThrough } from 'node:stream';
 import type { Response } from 'express';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { RunnableLambda } from '@langchain/core/runnables';
-import { LlmService } from './llm.service';
-import type { ChatModelLike } from './model.factory';
-import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
-import { basicTools } from './tools/basic.tools';
+import { LlmService } from '../../src/llm/llm.service';
+import type { ChatModelLike } from '../../src/llm/model.factory';
+import { REQUIREMENT_SYSTEM_PROMPT } from '../../src/llm/prompts/requirement.prompt';
+import { basicTools } from '../../src/llm/tools/basic.tools';
 
 class FakeChatModel implements ChatModelLike {
   public readonly invoke = jest.fn(async (messages: unknown[]) => ({

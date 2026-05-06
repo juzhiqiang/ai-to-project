@@ -1,8 +1,8 @@
 import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { RequirementResultSchema } from '@repo/contracts';
-import { RequirementService } from './requirement.service';
-import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
-import type { ChatModelFactory } from './model.factory';
+import { RequirementService } from '../../src/llm/requirement.service';
+import { REQUIREMENT_SYSTEM_PROMPT } from '../../src/llm/prompts/requirement.prompt';
+import type { ChatModelFactory } from '../../src/llm/model.factory';
 
 const TEST_INPUT = '用户注册时必须绑定手机号，密码至少8位';
 const STRUCTURED_RESULT = {

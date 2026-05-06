@@ -1,7 +1,7 @@
 import type { Response } from 'express';
-import { LlmController } from './llm.controller';
-import type { LlmService } from './llm.service';
-import type { RequirementService } from './requirement.service';
+import { LlmController } from '../../src/llm/llm.controller';
+import type { LlmService } from '../../src/llm/llm.service';
+import type { RequirementService } from '../../src/llm/requirement.service';
 
 describe('LlmController', () => {
   const service = {
