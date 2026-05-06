@@ -1,10 +1,11 @@
 import { PassThrough } from 'node:stream';
 import type { Response } from 'express';
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { RunnableLambda } from '@langchain/core/runnables';
 import { LlmService } from './llm.service';
 import type { ChatModelLike } from './model.factory';
 import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
+import { basicTools } from './tools/basic.tools';
 
 class FakeChatModel implements ChatModelLike {
   public readonly invoke = jest.fn(async (messages: unknown[]) => ({
@@ -20,6 +21,28 @@ class FakeChatModel implements ChatModelLike {
   public async *stream(messages: unknown[]) {
     yield { content: `chunk:${messages.length}:1` };
     yield { content: 'chunk:2' };
+  }
+}
+
+class FakeToolChatModel implements ChatModelLike {
+  public readonly seenMessages: BaseMessage[][] = [];
+  private responseIndex = 0;
+
+  constructor(private readonly responses: AIMessage[]) {}
+
+  public readonly bindTools = jest.fn(() => this);
+
+  public readonly invoke = jest.fn(async (messages: BaseMessage[]) => {
+    this.seenMessages.push(messages);
+    const response = this.responses[this.responseIndex] ?? new AIMessage('');
+    this.responseIndex += 1;
+    return response;
+  });
+
+  public readonly batch = jest.fn(async () => []);
+
+  public async *stream() {
+    yield { content: '' };
   }
 }
 
@@ -172,5 +195,84 @@ describe('LlmService', () => {
     expect(result.results).toHaveLength(2);
     expect(result.results[0]).toContain(TEST_INPUT);
     expect(result.results[1]).toContain('用户登录时必须输入验证码');
+  });
+
+  it('binds basic tools before invoking the requirement model', async () => {
+    const toolModel = new FakeToolChatModel([
+      new AIMessage({
+        content: 'tool-bind-ready',
+        tool_calls: [
+          {
+            id: 'call_entity',
+            name: 'lookup_entity_definition',
+            args: { entity: 'phone_number' },
+            type: 'tool_call',
+          },
+        ],
+      }),
+    ]);
+    service = new LlmService(() => toolModel);
+
+    const result = await service.toolBind({ input: 'User registration must bind a phone number.' });
+
+    expect(toolModel.bindTools).toHaveBeenCalledWith(basicTools);
+    expect(result).toEqual({
+      content: 'tool-bind-ready',
+      toolCalls: [
+        {
+          id: 'call_entity',
+          name: 'lookup_entity_definition',
+          args: { entity: 'phone_number' },
+        },
+      ],
+    });
+  });
+
+  it('executes requested tools and returns their results to the model', async () => {
+    const toolModel = new FakeToolChatModel([
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_constraint',
+            name: 'check_constraint_validity',
+            args: { constraint: 'password must be at least 8 characters' },
+            type: 'tool_call',
+          },
+          {
+            id: 'call_entity',
+            name: 'lookup_entity_definition',
+            args: { entity: 'phone_number' },
+            type: 'tool_call',
+          },
+        ],
+      }),
+      new AIMessage('tool-loop:done'),
+    ]);
+    service = new LlmService(() => toolModel);
+
+    const result = await service.toolLoop({ input: 'User registration must bind a phone number.' });
+
+    expect(toolModel.bindTools).toHaveBeenCalledWith(basicTools);
+    expect(toolModel.invoke).toHaveBeenCalledTimes(2);
+    expect(result.content).toBe('tool-loop:done');
+    expect(result.toolResults).toEqual([
+      expect.objectContaining({
+        id: 'call_constraint',
+        name: 'check_constraint_validity',
+        content: expect.stringContaining('"valid":true'),
+      }),
+      expect.objectContaining({
+        id: 'call_entity',
+        name: 'lookup_entity_definition',
+        content: expect.stringContaining('user contact number'),
+      }),
+    ]);
+
+    const secondInvokeMessages = toolModel.seenMessages[1];
+    const toolMessages = secondInvokeMessages.filter((message) => message instanceof ToolMessage) as ToolMessage[];
+    expect(toolMessages).toHaveLength(2);
+    expect(toolMessages[0].tool_call_id).toBe('call_constraint');
+    expect(toolMessages[1].tool_call_id).toBe('call_entity');
   });
 });

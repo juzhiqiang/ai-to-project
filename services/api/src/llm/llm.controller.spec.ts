@@ -13,6 +13,8 @@ describe('LlmController', () => {
     chainInvoke: jest.fn(async () => ({ content: 'from-chain' })),
     chainStream: jest.fn(async () => undefined),
     chainBatch: jest.fn(async () => ({ results: ['from-chain'] })),
+    toolBind: jest.fn(async () => ({ content: 'from-tool-bind', toolCalls: [] })),
+    toolLoop: jest.fn(async () => ({ content: 'from-tool-loop', toolCalls: [], toolResults: [] })),
   } as unknown as LlmService;
 
   const requirementService = {
@@ -73,6 +75,23 @@ describe('LlmController', () => {
   it('delegates chain batch to the service', async () => {
     await expect(controller.chainBatch({ inputs: ['hello'] })).resolves.toEqual({ results: ['from-chain'] });
     expect(service.chainBatch).toHaveBeenCalledWith({ inputs: ['hello'] });
+  });
+
+  it('delegates tool bind to the service', async () => {
+    await expect(controller.toolBind({ input: 'hello' })).resolves.toEqual({
+      content: 'from-tool-bind',
+      toolCalls: [],
+    });
+    expect(service.toolBind).toHaveBeenCalledWith({ input: 'hello' });
+  });
+
+  it('delegates tool loop to the service', async () => {
+    await expect(controller.toolLoop({ input: 'hello' })).resolves.toEqual({
+      content: 'from-tool-loop',
+      toolCalls: [],
+      toolResults: [],
+    });
+    expect(service.toolLoop).toHaveBeenCalledWith({ input: 'hello' });
   });
 
   it('delegates structured extraction to the requirement service', async () => {

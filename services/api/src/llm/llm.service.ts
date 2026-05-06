@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Response } from 'express';
-import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { CHAT_MODEL_FACTORY, type ChatModelFactory, type ModelResponseLike } from './model.factory';
 import { buildRequirementPromptTemplate } from './requirement.prompt-builder';
 import { requirementChain, type RequirementChainModel } from './requirement.chain';
 import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt';
+import { basicTools } from './tools/basic.tools';
 
 const SYSTEM_ROLE = REQUIREMENT_SYSTEM_PROMPT;
 
@@ -27,6 +28,31 @@ export interface RequirementChainBatchDto {
 export interface RenderedPromptMessage {
   type: string;
   content: string;
+}
+
+export interface RequirementToolCall {
+  id?: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface RequirementToolResult {
+  id?: string;
+  name: string;
+  content: string;
+  error?: boolean;
+}
+
+interface ToolBoundModel {
+  invoke(messages: BaseMessage[]): Promise<ModelResponseLike>;
+}
+
+interface ToolBindableModel {
+  bindTools(tools: typeof basicTools): ToolBoundModel;
+}
+
+interface InvokableRequirementTool {
+  invoke(input: Record<string, unknown>): Promise<unknown>;
 }
 
 @Injectable()
@@ -76,6 +102,47 @@ export class LlmService {
     return { results };
   }
 
+  async toolBind(body: RequirementPromptDto) {
+    const response = await this.buildToolBoundModel().invoke(await this.buildRequirementMessages(body.input));
+
+    return {
+      content: normalizeContent(response.content),
+      toolCalls: extractToolCalls(response),
+    };
+  }
+
+  async toolLoop(body: RequirementPromptDto) {
+    const model = this.buildToolBoundModel();
+    const messages = await this.buildRequirementMessages(body.input);
+    const firstResponse = await model.invoke(messages);
+    const toolCalls = extractToolCalls(firstResponse);
+    const toolResults = await Promise.all(toolCalls.map((item) => runBasicTool(item)));
+
+    if (toolResults.length === 0) {
+      return {
+        content: normalizeContent(firstResponse.content),
+        toolCalls,
+        toolResults,
+      };
+    }
+
+    const toolMessages = toolResults.map(
+      (result) =>
+        new ToolMessage({
+          content: result.content,
+          tool_call_id: result.id ?? result.name,
+          status: result.error ? 'error' : 'success',
+        }),
+    );
+    const finalResponse = await model.invoke([...messages, firstResponse as unknown as BaseMessage, ...toolMessages]);
+
+    return {
+      content: normalizeContent(finalResponse.content),
+      toolCalls,
+      toolResults,
+    };
+  }
+
   async stream(body: InvokeLlmDto, response: Response) {
     response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     response.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -109,6 +176,16 @@ export class LlmService {
   private buildRequirementChain() {
     return requirementChain(this.createChatModel() as unknown as RequirementChainModel);
   }
+
+  private buildToolBoundModel(): ToolBoundModel {
+    const model = this.createChatModel() as unknown as Partial<ToolBindableModel>;
+
+    if (typeof model.bindTools !== 'function') {
+      throw new Error('Chat model does not support LangChain tool binding');
+    }
+
+    return model.bindTools(basicTools);
+  }
 }
 
 function toRenderedPromptMessage(message: BaseMessage): RenderedPromptMessage {
@@ -116,6 +193,82 @@ function toRenderedPromptMessage(message: BaseMessage): RenderedPromptMessage {
     type: message.type,
     content: normalizeContent(message.content),
   };
+}
+
+function extractToolCalls(response: unknown): RequirementToolCall[] {
+  if (!isRecord(response) || !Array.isArray(response.tool_calls)) {
+    return [];
+  }
+
+  return response.tool_calls
+    .filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.name === 'string')
+    .map((item) => ({
+      id: typeof item.id === 'string' ? item.id : undefined,
+      name: item.name as string,
+      args: normalizeToolArgs(item.args),
+    }));
+}
+
+async function runBasicTool(toolCall: RequirementToolCall): Promise<RequirementToolResult> {
+  const selectedTool = basicTools.find((item) => item.name === toolCall.name);
+
+  if (!selectedTool) {
+    return {
+      id: toolCall.id,
+      name: toolCall.name,
+      content: `Unknown tool: ${toolCall.name}`,
+      error: true,
+    };
+  }
+
+  try {
+    const output = await (selectedTool as InvokableRequirementTool).invoke(toolCall.args);
+
+    return {
+      id: toolCall.id,
+      name: toolCall.name,
+      content: normalizeToolOutput(output),
+    };
+  } catch (error) {
+    return {
+      id: toolCall.id,
+      name: toolCall.name,
+      content: error instanceof Error ? error.message : String(error),
+      error: true,
+    };
+  }
+}
+
+function normalizeToolArgs(args: unknown): Record<string, unknown> {
+  if (isRecord(args)) {
+    return args;
+  }
+
+  if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args) as unknown;
+
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function normalizeToolOutput(output: unknown): string {
+  if (typeof output === 'string') {
+    return output;
+  }
+
+  return JSON.stringify(output);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeContent(content: unknown): string {

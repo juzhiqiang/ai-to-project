@@ -12,7 +12,9 @@ const STRUCTURED_RESULT = {
 };
 
 class FakeStructuredModel {
-  public readonly invokeStructured = jest.fn(async () => STRUCTURED_RESULT);
+  constructor(private readonly structuredResult: unknown = STRUCTURED_RESULT) {}
+
+  public readonly invokeStructured = jest.fn(async () => this.structuredResult);
 
   public readonly withStructuredOutput = jest.fn(() => ({
     invoke: this.invokeStructured,
@@ -36,5 +38,16 @@ describe('RequirementService', () => {
     expect(messages[1]).toBeInstanceOf(HumanMessage);
     expect(messages[1].content).toContain(TEST_INPUT);
     expect(messages.map((message) => message.content).join('\n')).toMatch(/json/i);
+  });
+
+  it('normalizes a string action returned by structured output', async () => {
+    const model = new FakeStructuredModel({
+      action: '绑定手机号',
+      constraints: ['必须绑定手机号', '密码至少8位'],
+      entities: ['用户注册', '手机号', '密码'],
+    });
+    const service = new RequirementService((() => model) as unknown as ChatModelFactory);
+
+    await expect(service.extract(TEST_INPUT)).resolves.toEqual(STRUCTURED_RESULT);
   });
 });

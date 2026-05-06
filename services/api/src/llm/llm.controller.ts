@@ -56,6 +56,16 @@ export class LlmController {
     return this.llmService.chainBatch(body);
   }
 
+  @Post('tool-bind')
+  toolBind(@Body() body: RequirementPromptDto) {
+    return this.llmService.toolBind(body);
+  }
+
+  @Post('tool-loop')
+  toolLoop(@Body() body: RequirementPromptDto) {
+    return this.llmService.toolLoop(body);
+  }
+
   @Post('structured')
   structured(@Body() body: RequirementPromptDto) {
     return this.requirementService.extract(body.input);

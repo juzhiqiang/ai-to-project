@@ -2,11 +2,19 @@ import { z } from 'zod';
 
 export const APP_NAME = "llm";
 
+const RequirementActionSchema = z.preprocess(
+  (value) => {
+    if (typeof value === 'string') {
+      return value ? [value] : [];
+    }
+
+    return value;
+  },
+  z.array(z.string()).max(1),
+);
+
 export const RequirementSchema = z.object({
-  action: z
-    .array(z.string())
-    .max(1)
-    .describe('唯一核心动作'),
+  action: RequirementActionSchema.describe('唯一核心动作'),
   constraints: z.array(z.string()).describe('明确约束条件'),
   entities: z.array(z.string()).describe('关键实体'),
 });
