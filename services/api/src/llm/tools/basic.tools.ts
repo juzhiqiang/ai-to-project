@@ -52,20 +52,25 @@ export const checkConstraintValidityTool = tool(
 );
 
 export const lookupEntityDefinitionTool = tool(
-  ({ entity }) => {
+  async ({ entity }: { entity: string }) => {
+    const definitions: Record<string, string> = {
+      ...entityDefinitions,
+      用户: '系统中的账号主体',
+      手机号: '用于身份绑定与验证的联系字段',
+      密码: '用于登录认证的安全凭证',
+    };
     const normalized = entity.trim();
-    const definition = entityDefinitions[normalized] ?? 'No local definition found for this entity.';
 
     return JSON.stringify({
       entity: normalized,
-      definition,
+      definition: definitions[normalized] ?? '未命中内置定义',
     });
   },
   {
     name: 'lookup_entity_definition',
-    description: 'Look up a short local definition for a requirement entity.',
+    description: '查询实体在业务中的定义说明',
     schema: z.object({
-      entity: z.string().describe('The entity name to define.'),
+      entity: z.string(),
     }),
   },
 );

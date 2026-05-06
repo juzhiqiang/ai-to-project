@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: "/requirement/:path*",
+        destination: `${process.env.API_ORIGIN ?? "http://localhost:3001"}/requirement/:path*`,
+      },
+      {
         source: "/api/:path*",
         destination: `${process.env.API_ORIGIN ?? "http://localhost:3001"}/:path*`,
       },

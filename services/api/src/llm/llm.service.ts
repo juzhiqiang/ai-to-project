@@ -60,7 +60,7 @@ export class LlmService {
   constructor(
     @Inject(CHAT_MODEL_FACTORY)
     private readonly createChatModel: ChatModelFactory,
-  ) {}
+  ) { }
 
   async invoke(body: InvokeLlmDto) {
     const response = await this.createChatModel().invoke(await this.buildRequirementMessages(body.prompt));
@@ -103,7 +103,10 @@ export class LlmService {
   }
 
   async toolBind(body: RequirementPromptDto) {
-    const response = await this.buildToolBoundModel().invoke(await this.buildRequirementMessages(body.input));
+    const response = await this.buildToolBoundModel().invoke([
+      new SystemMessage('你可以按需要调用工具来校验约束和查询实体定义。'),
+      new HumanMessage(`请分析下面需求：${body.input}`),
+    ]);
 
     return {
       content: normalizeContent(response.content),
@@ -113,7 +116,12 @@ export class LlmService {
 
   async toolLoop(body: RequirementPromptDto) {
     const model = this.buildToolBoundModel();
-    const messages = await this.buildRequirementMessages(body.input);
+    const messages: BaseMessage[] = [
+      new SystemMessage('你可以调用工具来帮助完成需求抽取后的校验。'),
+      new HumanMessage(
+        `先抽取 action、constraints、entities，再按需要调用工具：${body.input}`
+      ),
+    ];
     const firstResponse = await model.invoke(messages);
     const toolCalls = extractToolCalls(firstResponse);
     const toolResults = await Promise.all(toolCalls.map((item) => runBasicTool(item)));
