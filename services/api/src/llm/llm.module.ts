@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AgentsController } from './agents/agents.controller';
+import { OrchestratorService } from './agents/orchestrator.service';
 import { EmbeddingController } from './embedding/embedding.controller';
 import { EmbeddingService } from './embedding/embedding.service';
 import { VectorStoreService } from './embedding/vector-store.service';
@@ -12,7 +14,7 @@ import { CHAT_MODEL_FACTORY, createChatModel } from './model.factory';
 import { RequirementService } from './requirement.service';
 
 @Module({
-  controllers: [LlmController, MemoryController, FilesController, EmbeddingController],
+  controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController],
   providers: [
     LlmService,
     RequirementService,
@@ -20,11 +22,20 @@ import { RequirementService } from './requirement.service';
     FilesystemService,
     EmbeddingService,
     VectorStoreService,
+    OrchestratorService,
     {
       provide: CHAT_MODEL_FACTORY,
       useValue: createChatModel,
     },
   ],
-  exports: [LlmService, RequirementService, RunnableMemoryService, FilesystemService, EmbeddingService, VectorStoreService],
+  exports: [
+    LlmService,
+    RequirementService,
+    RunnableMemoryService,
+    FilesystemService,
+    EmbeddingService,
+    VectorStoreService,
+    OrchestratorService,
+  ],
 })
 export class LlmModule { }
