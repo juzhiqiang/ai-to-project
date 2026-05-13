@@ -7,15 +7,18 @@ const CUSTOMER_INPUT = '我买的蓝牙耳机降噪效果不好，订单号 EC20
 
 function createScriptedModel(outputs: Record<string, string>) {
   const invokedAgents: string[] = [];
+  const agentNames = Object.keys(outputs);
+  let agentIndex = 0;
   const model = RunnableLambda.from(async (promptValue: { toChatMessages: () => BaseMessage[] }) => {
     const messages = promptValue.toChatMessages();
     const system = String(messages[0].content);
-    const agentName = Object.keys(outputs).find((name) => system.includes(name));
+    const agentName = agentNames.find((name) => system.includes(name)) ?? agentNames[agentIndex];
 
     if (!agentName) {
       throw new Error(`Unexpected prompt: ${system}`);
     }
 
+    agentIndex += 1;
     invokedAgents.push(agentName);
     return new AIMessage(outputs[agentName]);
   });
@@ -88,11 +91,41 @@ describe('OrchestratorService', () => {
     expect(invokedAgents).toEqual(['extractAgent']);
   });
 
+  it('continues when receivedDate is missing from extraction but present as a relative signed date in the input', async () => {
+    const { factory } = createScriptedModel({
+      extractAgent: JSON.stringify({
+        orderId: 'EC20240315001',
+        productId: 'P-BT-001',
+        requestType: 'return',
+        receivedDate: null,
+        isUnopened: true,
+      }),
+      policyCheckAgent: '符合退货条件：昨天签收且未拆封。',
+      riskReviewAgent: '低风险。',
+      qaAgent: 'Given 昨天签收且未拆封\nWhen 用户申请退货\nThen 客服应进入退货流程',
+      summaryAgent: '# 退货判断报告\n建议进入退货流程。',
+    });
+    const service = new OrchestratorService(factory);
+
+    const result = await service.orchestrate(
+      '订单号 EC20240315001，商品还没拆封，是昨天签收的，想知道能不能退。',
+    );
+
+    expect(result.mode).toBe('completed');
+    expect(result.clarificationQuestions).not.toContain('请说明收货日期或签收时间。');
+    expect(result.steps[1]).toEqual(
+      expect.objectContaining({
+        agent: 'policyCheckAgent',
+        output: expect.stringContaining('符合退货条件'),
+      }),
+    );
+  });
+
   it('falls back to manual review when any agent throws', async () => {
     const model = RunnableLambda.from(async (promptValue: { toChatMessages: () => BaseMessage[] }) => {
       const system = String(promptValue.toChatMessages()[0].content);
 
-      if (system.includes('extractAgent')) {
+      if (system.includes('抽取')) {
         return new AIMessage(
           JSON.stringify({
             orderId: 'EC20240315001',

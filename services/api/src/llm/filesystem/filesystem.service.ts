@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { CHAT_MODEL_FACTORY, type ChatModelFactory, type ModelResponseLike } from '../model.factory';
-import { businessTools } from '../tools/business.tools';
+import { businessTools, writeWorkspaceFileTool } from '../tools/business.tools';
 
 const MAX_TOOL_ITERATIONS = 5;
 
@@ -22,6 +22,11 @@ export interface FileChatResult {
   content: string;
   toolCalls: FileToolCall[];
   toolResults: FileToolResult[];
+}
+
+export interface FileWriteResult {
+  path: string;
+  written: boolean;
 }
 
 interface ToolBoundModel {
@@ -82,6 +87,13 @@ export class FilesystemService {
       toolCalls: allToolCalls,
       toolResults: allToolResults,
     };
+  }
+
+  async writeFile(path: string, content: string): Promise<FileWriteResult> {
+    const output = await (writeWorkspaceFileTool as InvokableBusinessTool).invoke({ path, content });
+    const parsed = JSON.parse(normalizeToolOutput(output)) as FileWriteResult;
+
+    return parsed;
   }
 
   private buildToolBoundModel(): ToolBoundModel {

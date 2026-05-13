@@ -44,8 +44,8 @@ export class OrchestratorService {
     try {
       const agents = this.buildAgents();
       const extractionOutput = await agents.extractAgent.invoke({ input });
-      const extraction = parseExtraction(extractionOutput);
-      steps.push({ agent: 'extractAgent', output: extractionOutput });
+      const extraction = completeExtraction(parseExtraction(extractionOutput), input);
+      steps.push({ agent: 'extractAgent', output: JSON.stringify(extraction) });
 
       const clarificationQuestions = buildClarificationQuestions(extraction);
 
@@ -120,6 +120,51 @@ function parseExtraction(output: string): CustomerServiceExtraction {
   }
 
   return parsed as CustomerServiceExtraction;
+}
+
+function completeExtraction(extraction: CustomerServiceExtraction, input: string): CustomerServiceExtraction {
+  return {
+    ...extraction,
+    requestType: hasExtractionValue(extraction.requestType) ? extraction.requestType : inferRequestType(input),
+    receivedDate: hasExtractionValue(extraction.receivedDate) ? extraction.receivedDate : inferReceivedDate(input),
+    isUnopened: hasExtractionValue(extraction.isUnopened) ? extraction.isUnopened : inferIsUnopened(input),
+  };
+}
+
+function inferRequestType(input: string) {
+  if (/(退货|退掉|退回|能不能退|可以退)/.test(input)) {
+    return 'return';
+  }
+
+  if (/(退款|退钱)/.test(input)) {
+    return 'refund';
+  }
+
+  if (/(换货|更换|换一个)/.test(input)) {
+    return 'exchange';
+  }
+
+  return null;
+}
+
+function inferReceivedDate(input: string) {
+  const relativeBeforeVerb = input.match(/(今天|昨天|前天|刚刚|刚|当天).{0,12}(收到|签收|收货)/);
+  const verbBeforeRelative = input.match(/(收到|签收|收货).{0,12}(今天|昨天|前天|刚刚|刚|当天)/);
+  const absoluteDate = input.match(/(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|\d{1,2}月\d{1,2}日)/);
+
+  return relativeBeforeVerb?.[1] ?? verbBeforeRelative?.[2] ?? absoluteDate?.[1] ?? null;
+}
+
+function inferIsUnopened(input: string) {
+  if (/(没拆封|未拆封|没有拆封|还没拆|全新未拆)/.test(input)) {
+    return true;
+  }
+
+  if (/(已拆封|拆开了|拆过|使用过|用过)/.test(input)) {
+    return false;
+  }
+
+  return null;
 }
 
 function stripJsonFence(output: string) {

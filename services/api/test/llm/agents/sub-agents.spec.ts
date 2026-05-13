@@ -38,10 +38,10 @@ describe('buildCustomerServiceAgents', () => {
     expect(Object.keys(agents)).toEqual(CUSTOMER_SERVICE_AGENT_NAMES);
     expect(seenMessages).toHaveLength(5);
     expect(seenMessages[0][0]).toBeInstanceOf(SystemMessage);
-    expect(seenMessages[0][0].content).toContain('extractAgent');
+    expect(seenMessages[0][0].content).toContain('抽取');
     expect(seenMessages[0][1]).toBeInstanceOf(HumanMessage);
     expect(seenMessages[0][1].content).toContain('EC20240315001');
-    expect(seenMessages[1][0].content).toContain('policyCheckAgent');
+    expect(seenMessages[1][0].content).toContain('政策');
     expect(seenMessages[2][0].content).toContain('riskReviewAgent');
     expect(seenMessages[3][0].content).toContain('qaAgent');
     expect(seenMessages[4][0].content).toContain('summaryAgent');

@@ -58,7 +58,7 @@ export function buildCustomerServiceAgents(model: CustomerServiceAgentModel): Cu
         - orderId: 订单号
         - productId: 商品 ID（如 headphone-x1）
         - requestType: 退货 | 换货 | 退款
-        - receivedDate: 收货日期（YYYY-MM-DD）
+        - receivedDate: 收货日期或相对签收时间（如 YYYY-MM-DD、昨天、今天）
         - isUnopened: 是否未拆封（true/false）
         如果某字段在对话中未提及，设为 null。`,
       ].join('\n'),
