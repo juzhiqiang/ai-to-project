@@ -1,0 +1,23 @@
+在 services/chat 中完成数据库设计与初始化，严格按以下要求执行：
+
+前置：
+- 安装依赖：prisma @prisma/client
+- 初始化 Prisma：bunx prisma init
+- 在 .env 中配置 DATABASE_URL（PostgreSQL 连接串）
+
+1. Prisma Schema 设计（schema.prisma）：
+   - 启用 pgvector 扩展：generator client 中加 previewFeatures = ["postgresqlExtensions"]，datasource 中加 extensions = [pgvector]
+   - User 表已中建好，直接复用，只需在 schema 中保留关联关系
+   - Conversation 表：id, title, userId（关联 User）, createdAt, updatedAt
+   - Message 表：id, conversationId（关联 Conversation）, role（system/human/ai/tool）, content, metadata（Json?）, createdAt
+   - Document 表：id, userId（关联 User）, filename, originalName, mimeType, size, status（pending/processing/completed/failed）, chunkCount, createdAt, updatedAt
+   - DocumentChunk 表：id, documentId（关联 Document）, content, chunkIndex, metadata（Json?）, embedding（Unsupported("vector(384)")）, createdAt
+
+2. Prisma Service：
+   - 新建 services/api/src/prisma/prisma.service.ts
+   - 新建 services/api/src/prisma/prisma.module.ts（Global module）
+
+3. 迁移与验证：
+   - 执行 bunx prisma migrate dev --name init
+   - 执行 bunx prisma generate
+   - 手动启用 pgvector 扩展：CREATE EXTENSION IF NOT EXISTS vector
