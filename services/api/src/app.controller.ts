@@ -8,7 +8,7 @@ interface RequirementExtractDto {
 
 @Controller()
 export class AppController {
-  constructor(private readonly requirementService: RequirementService) {}
+  constructor(private readonly requirementService: RequirementService) { }
 
   @Get("/health")
   health() {

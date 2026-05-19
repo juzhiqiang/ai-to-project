@@ -1,6 +1,6 @@
 llm:
   provider: openai
-  model: ep-wle31i-1770351442334904533
+  model: ep-hi0i5y-1779174547802370491
   temperature: 0
   maxTokens: 4096
 retrieval:
