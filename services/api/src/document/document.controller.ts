@@ -12,13 +12,17 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentService } from './document.service';
+import { ChunkService } from './chunk.service';
 import { UserIdGuard } from '../auth/user-id.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
 @UseGuards(UserIdGuard)
 @Controller('api/documents')
 export class DocumentController {
-  constructor(private readonly documentService: DocumentService) { }
+  constructor(
+    private readonly documentService: DocumentService,
+    private readonly chunkService: ChunkService
+  ) { }
 
   /**
    * 上传文件
@@ -32,8 +36,8 @@ export class DocumentController {
     @UploadedFile(
       new ParseFilePipeBuilder()
         .addFileTypeValidator({
-          // 支持 text/plain, text/markdown, application/pdf
-          fileType: /(text\/plain|text\/markdown|application\/pdf)/,
+          // 支持 text/plain, text/markdown, application/pdf, doc, docx
+          fileType: /(text\/plain|text\/markdown|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)/,
         })
         .addMaxSizeValidator({
           maxSize: 10 * 1024 * 1024, // 10 MB
@@ -45,6 +49,14 @@ export class DocumentController {
     file: Express.Multer.File,
   ) {
     return this.documentService.upload(userId, file);
+  }
+
+  /**
+   * 触发文件解析与分块
+   */
+  @Post(':id/process')
+  process(@Param('id') id: string, @CurrentUser() userId: string) {
+    return this.chunkService.chunkDocument(id, userId);
   }
 
   /**

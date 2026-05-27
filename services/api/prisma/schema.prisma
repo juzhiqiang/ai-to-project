@@ -67,7 +67,7 @@ model DocumentChunk {
   content    String
   chunkIndex Int
   metadata   Json?
-  embedding  Unsupported("vector(384)")
+  embedding  Unsupported("vector(384)")?
   createdAt  DateTime                   @default(now())
 
   @@unique([documentId, chunkIndex])
