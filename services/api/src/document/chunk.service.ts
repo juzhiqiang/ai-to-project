@@ -4,6 +4,7 @@ import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { ParserFactory } from './parsers/parser.factory';
 import { EmbeddingService } from '../embedding/embedding.service';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class ChunkService {
@@ -52,15 +53,27 @@ export class ChunkService {
         where: { documentId: documentId },
       });
 
-      // 批量写入文本块
-      await this.prisma.documentChunk.createMany({
-        data: chunkedDocs.map((chunk, index) => ({
-          documentId,
-          content: chunk.pageContent,
-          chunkIndex: index,
-          metadata: chunk.metadata as any,
-        })),
-      });
+      await Promise.all(
+        chunkedDocs.map((chunk, index) =>
+          this.prisma.$executeRawUnsafe(
+            `
+            INSERT INTO "DocumentChunk" (
+              "id",
+              "documentId",
+              "content",
+              "chunkIndex",
+              "metadata"
+            )
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            `,
+            randomUUID(),
+            documentId,
+            chunk.pageContent,
+            index,
+            JSON.stringify(chunk.metadata ?? {}),
+          ),
+        ),
+      );
 
       // 5. 向量化所有 chunks 并写入 embedding 字段
       await this.embeddingService.embedChunks(documentId);

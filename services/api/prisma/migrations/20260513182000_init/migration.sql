@@ -67,7 +67,7 @@ CREATE TABLE "DocumentChunk" (
     "content" TEXT NOT NULL,
     "chunkIndex" INTEGER NOT NULL,
     "metadata" JSONB,
-    "embedding" vector(384) NOT NULL,
+    "embedding" vector(384),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "DocumentChunk_pkey" PRIMARY KEY ("id")

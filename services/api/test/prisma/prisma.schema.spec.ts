@@ -3,6 +3,13 @@ import { join } from 'node:path';
 
 const schemaPath = join(process.cwd(), 'prisma', 'schema.prisma');
 const configPath = join(process.cwd(), 'prisma.config.ts');
+const migrationPath = join(
+  process.cwd(),
+  'prisma',
+  'migrations',
+  '20260513182000_init',
+  'migration.sql',
+);
 
 function readSchema() {
   expect(existsSync(schemaPath)).toBe(true);
@@ -132,5 +139,14 @@ describe('Prisma schema', () => {
     expect(status).toContain('processing');
     expect(status).toContain('completed');
     expect(status).toContain('failed');
+  });
+
+  it('allows document chunks to be inserted before embeddings are written', () => {
+    expect(existsSync(migrationPath)).toBe(true);
+
+    const migration = readFileSync(migrationPath, 'utf8');
+
+    expect(migration).toMatch(/"embedding"\s+vector\(384\)/);
+    expect(migration).not.toMatch(/"embedding"\s+vector\(384\)\s+NOT NULL/);
   });
 });
