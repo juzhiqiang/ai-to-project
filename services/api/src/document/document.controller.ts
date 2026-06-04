@@ -8,7 +8,8 @@ import {
   UseInterceptors,
   UploadedFile,
   ParseFilePipeBuilder,
-  HttpStatus
+  HttpStatus,
+  HttpCode,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentService } from './document.service';
@@ -38,6 +39,9 @@ export class DocumentController {
         .addFileTypeValidator({
           // 支持 text/plain, text/markdown, application/pdf, doc, docx
           fileType: /(text\/plain|text\/markdown|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)/,
+          // 纯文本（txt/md）没有 magic number，file-type 无法识别 → 检测不出时回退到
+          // 请求声明的 mimetype 比较；pdf/doc/docx 仍走 magic number 内容校验。
+          fallbackToMimetype: true,
         })
         .addMaxSizeValidator({
           maxSize: 10 * 1024 * 1024, // 10 MB
@@ -55,8 +59,21 @@ export class DocumentController {
    * 触发文件解析与分块
    */
   @Post(':id/process')
-  process(@Param('id') id: string, @CurrentUser() userId: string) {
-    return this.chunkService.chunkDocument(id, userId);
+  @HttpCode(HttpStatus.ACCEPTED)
+  async process(@Param('id') id: string, @CurrentUser() userId: string) {
+    // 先同步校验文档存在且属于当前用户（立即反馈 404/403）
+    await this.documentService.findById(id, userId);
+
+    // 异步触发向量化，立即返回 202 Accepted；处理进度通过 SSE (/api/sse) 推送
+    void this.chunkService.chunkDocument(id, userId).catch((err) => {
+      console.error(`后台向量化任务失败 doc=${id}:`, err);
+    });
+
+    return {
+      accepted: true,
+      documentId: id,
+      message: '文档处理已开始，请通过 /api/sse 监听处理进度',
+    };
   }
 
   /**

@@ -30,6 +30,46 @@ function createScriptedModel(outputs: Record<string, string>) {
 }
 
 describe('OrchestratorService', () => {
+  it('passes retrieved policy context into policy and summary agents', async () => {
+    const seenPrompts: Record<string, string[]> = {};
+    const outputs = {
+      extractAgent: JSON.stringify({
+        orderId: 'EC20240315001',
+        productId: 'P-BT-001',
+        requestType: 'return',
+        receivedDate: '昨天',
+        isUnopened: true,
+      }),
+      policyCheckAgent: '符合上传政策：return-policy.md 允许签收 7 天内未拆封退货。',
+      riskReviewAgent: '低风险。',
+      qaAgent: 'Given 上传退货政策允许\nWhen 用户申请退货\nThen 客服应批准退货',
+      summaryAgent: '# 退货判断报告\n引用 return-policy.md，建议通过退货申请。',
+    };
+    const agentNames = Object.keys(outputs);
+    let agentIndex = 0;
+    const model = RunnableLambda.from(async (promptValue: { toChatMessages: () => BaseMessage[] }) => {
+      const messages = promptValue.toChatMessages();
+      const system = String(messages[0].content);
+      const agentName = agentNames.find((name) => system.includes(name)) ?? agentNames[agentIndex];
+      if (!agentName) {
+        throw new Error(`Unexpected prompt: ${system}`);
+      }
+
+      seenPrompts[agentName] = messages.map((message) => String(message.content));
+      agentIndex += 1;
+      return new AIMessage(outputs[agentName as keyof typeof outputs]);
+    });
+    const service = new OrchestratorService((() => model) as unknown as ChatModelFactory);
+
+    await service.orchestrate({
+      input: CUSTOMER_INPUT,
+      policyContext: '【参考文档 1】return-policy.md：签收 7 天内未拆封可退货。',
+    } as any);
+
+    expect(seenPrompts.policyCheckAgent.join('\n')).toContain('return-policy.md：签收 7 天内未拆封可退货');
+    expect(seenPrompts.summaryAgent.join('\n')).toContain('return-policy.md：签收 7 天内未拆封可退货');
+  });
+
   it('runs the fixed workflow and returns a final report', async () => {
     const { factory, invokedAgents } = createScriptedModel({
       extractAgent: JSON.stringify({

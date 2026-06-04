@@ -21,15 +21,18 @@ export interface ExtractAgentInput {
 
 export interface PolicyCheckAgentInput {
   extraction: string;
+  policyContext: string;
 }
 
 export interface RiskReviewAgentInput {
   input: string;
   extraction: string;
+  policyContext: string;
 }
 
 export interface QaAgentInput {
   extraction: string;
+  policyContext: string;
   policyCheck: string;
   riskReview: string;
 }
@@ -37,6 +40,7 @@ export interface QaAgentInput {
 export interface SummaryAgentInput {
   input: string;
   extraction: string;
+  policyContext: string;
   policyCheck: string;
   riskReview: string;
   qa: string;
@@ -67,9 +71,10 @@ export function buildCustomerServiceAgents(model: CustomerServiceAgentModel): Cu
     ),
     policyCheckAgent: buildAgent<PolicyCheckAgentInput>(
       [
-        '你是政策校验专家。根据标准退货政策（7 天无理由退货，商品需未拆封），判断下面的抽取结果是否符合退货条件，并给出原因。',
+        '你是 policyCheckAgent，专门根据上传的政策文档判断退货与退款条件。',
+        '必须优先使用「参考政策文档」中的条款；如果没有参考文档，再说明只能按默认规则初判。',
       ].join('\n'),
-      '抽取结果：{extraction}',
+      ['参考政策文档：', '{policyContext}', '抽取结果：{extraction}'].join('\n'),
       model,
     ),
     riskReviewAgent: buildAgent<RiskReviewAgentInput>(
@@ -77,7 +82,7 @@ export function buildCustomerServiceAgents(model: CustomerServiceAgentModel): Cu
         '你是 riskReviewAgent，专门识别客服退货咨询中的歧义、冲突或缺失信息。',
         '请列出风险点；如果没有明显风险，也要明确说明低风险。',
       ].join('\n'),
-      ['客服对话：{input}', '抽取结果：{extraction}'].join('\n'),
+      ['参考政策文档：', '{policyContext}', '客服对话：{input}', '抽取结果：{extraction}'].join('\n'),
       model,
     ),
     qaAgent: buildAgent<QaAgentInput>(
@@ -85,7 +90,7 @@ export function buildCustomerServiceAgents(model: CustomerServiceAgentModel): Cu
         '你是 qaAgent，专门根据抽取、政策校验和风控结果生成验收条件。',
         '必须使用 Given-When-Then 格式，至少输出一条可验证的条件。',
       ].join('\n'),
-      ['抽取结果：{extraction}', '政策校验：{policyCheck}', '风控结果：{riskReview}'].join('\n'),
+      ['参考政策文档：', '{policyContext}', '抽取结果：{extraction}', '政策校验：{policyCheck}', '风控结果：{riskReview}'].join('\n'),
       model,
     ),
     summaryAgent: buildAgent<SummaryAgentInput>(
@@ -94,6 +99,8 @@ export function buildCustomerServiceAgents(model: CustomerServiceAgentModel): Cu
         '报告应包含订单摘要、政策判断、风险点、验收条件和最终建议。',
       ].join('\n'),
       [
+        '参考政策文档：',
+        '{policyContext}',
         '客服对话：{input}',
         '抽取结果：{extraction}',
         '政策校验：{policyCheck}',

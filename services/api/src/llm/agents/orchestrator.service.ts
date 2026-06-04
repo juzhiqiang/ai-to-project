@@ -31,6 +31,11 @@ export interface OrchestratorResult {
   report: string;
 }
 
+export interface OrchestratorInput {
+  input: string;
+  policyContext?: string;
+}
+
 @Injectable()
 export class OrchestratorService {
   constructor(
@@ -38,8 +43,9 @@ export class OrchestratorService {
     private readonly createChatModel: ChatModelFactory,
   ) { }
 
-  async orchestrate(input: string): Promise<OrchestratorResult> {
+  async orchestrate(request: string | OrchestratorInput): Promise<OrchestratorResult> {
     const steps: AgentStep[] = [];
+    const { input, policyContext } = normalizeOrchestratorInput(request);
 
     try {
       const agents = this.buildAgents();
@@ -62,8 +68,8 @@ export class OrchestratorService {
 
       const extractionText = JSON.stringify(extraction);
       const [policyCheck, riskReview] = await Promise.all([
-        agents.policyCheckAgent.invoke({ extraction: extractionText }),
-        agents.riskReviewAgent.invoke({ input, extraction: extractionText }),
+        agents.policyCheckAgent.invoke({ extraction: extractionText, policyContext }),
+        agents.riskReviewAgent.invoke({ input, extraction: extractionText, policyContext }),
       ]);
       steps.push(
         { agent: 'policyCheckAgent', output: policyCheck },
@@ -72,6 +78,7 @@ export class OrchestratorService {
 
       const qa = await agents.qaAgent.invoke({
         extraction: extractionText,
+        policyContext,
         policyCheck,
         riskReview,
       });
@@ -80,6 +87,7 @@ export class OrchestratorService {
       const report = await agents.summaryAgent.invoke({
         input,
         extraction: extractionText,
+        policyContext,
         policyCheck,
         riskReview,
         qa,
@@ -109,6 +117,17 @@ export class OrchestratorService {
   private buildAgents(): CustomerServiceAgents {
     return buildCustomerServiceAgents(this.createChatModel() as unknown as CustomerServiceAgentModel);
   }
+}
+
+function normalizeOrchestratorInput(request: string | OrchestratorInput): Required<OrchestratorInput> {
+  if (typeof request === 'string') {
+    return { input: request, policyContext: '无相关政策文档' };
+  }
+
+  return {
+    input: request.input,
+    policyContext: request.policyContext?.trim() || '无相关政策文档',
+  };
 }
 
 function parseExtraction(output: string): CustomerServiceExtraction {

@@ -5,15 +5,13 @@ import {
   Get,
   Param,
   Post,
-  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
 import { UserIdGuard } from '../auth/user-id.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ConversationService } from './conversation.service';
 import { MessageService } from './message.service';
-import { ConversationChatService } from './conversation-chat.service';
+import { AdvancedAnalysisService } from '../llm/advanced-analysis.service';
 
 interface CreateConversationDto {
   title?: string;
@@ -29,7 +27,7 @@ export class ConversationController {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly messageService: MessageService,
-    private readonly chatService: ConversationChatService,
+    private readonly advancedAnalysisService: AdvancedAnalysisService,
   ) {}
 
   /** POST / — 创建会话 */
@@ -53,17 +51,28 @@ export class ConversationController {
     return { conversationId: id, messages };
   }
 
-  /** POST /:id/chat — 在指定会话中发送消息（RunnableWithMessageHistory 持久化） */
+  /**
+   * POST /:id/chat — 完整 RAG + Multi-Agent 分析链路
+   * 响应包含 report、usedAgents、retrievedDocuments
+   */
   @Post(':id/chat')
   async chat(
     @Param('id') id: string,
     @CurrentUser() userId: string,
     @Body() body: ChatDto,
-    @Res({ passthrough: true }) _res: Response,
   ) {
-    // 权限校验
+    // 权限校验：确保会话属于当前用户
     await this.conversationService.findById(id, userId);
-    return this.chatService.chat(id, body.input);
+
+    // 整合会话历史 + 语义检索 + 多 Agent 分析
+    const result = await this.advancedAnalysisService.analyze(userId, id, body.input);
+
+    return {
+      conversationId: id,
+      report: result.report,
+      usedAgents: result.usedAgents,
+      retrievedDocuments: result.retrievedDocuments,
+    };
   }
 
   /** DELETE /:id — 删除会话（含级联消息） */

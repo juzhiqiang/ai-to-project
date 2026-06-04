@@ -16,12 +16,25 @@ describe('buildCustomerServiceAgents', () => {
     await expect(
       Promise.all([
         agents.extractAgent.invoke({ input: '订单号 EC20240315001，昨天收到还没拆封，想退货' }),
-        agents.policyCheckAgent.invoke({ extraction: '{"orderId":"EC20240315001"}' }),
-        agents.riskReviewAgent.invoke({ input: '客服对话', extraction: '{"orderId":"EC20240315001"}' }),
-        agents.qaAgent.invoke({ extraction: '{"orderId":"EC20240315001"}', policyCheck: '符合退货条件', riskReview: '无风险' }),
+        agents.policyCheckAgent.invoke({
+          extraction: '{"orderId":"EC20240315001"}',
+          policyContext: 'return-policy.md：7 天内未拆封可退货。',
+        }),
+        agents.riskReviewAgent.invoke({
+          input: '客服对话',
+          extraction: '{"orderId":"EC20240315001"}',
+          policyContext: 'return-policy.md：7 天内未拆封可退货。',
+        }),
+        agents.qaAgent.invoke({
+          extraction: '{"orderId":"EC20240315001"}',
+          policyContext: 'return-policy.md：7 天内未拆封可退货。',
+          policyCheck: '符合退货条件',
+          riskReview: '无风险',
+        }),
         agents.summaryAgent.invoke({
           input: '客服对话',
           extraction: '{"orderId":"EC20240315001"}',
+          policyContext: 'return-policy.md：7 天内未拆封可退货。',
           policyCheck: '符合退货条件',
           riskReview: '无风险',
           qa: 'Given-When-Then',
@@ -42,8 +55,10 @@ describe('buildCustomerServiceAgents', () => {
     expect(seenMessages[0][1]).toBeInstanceOf(HumanMessage);
     expect(seenMessages[0][1].content).toContain('EC20240315001');
     expect(seenMessages[1][0].content).toContain('政策');
+    expect(seenMessages[1][1].content).toContain('return-policy.md');
     expect(seenMessages[2][0].content).toContain('riskReviewAgent');
     expect(seenMessages[3][0].content).toContain('qaAgent');
     expect(seenMessages[4][0].content).toContain('summaryAgent');
+    expect(seenMessages[4][1].content).toContain('return-policy.md');
   });
 });

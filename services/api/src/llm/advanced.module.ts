@@ -7,8 +7,11 @@ import { VectorStoreService } from './embedding/vector-store.service';
 import { FilesystemService } from './filesystem/filesystem.service';
 import { RunnableMemoryService } from './memory/runnable-memory.service';
 import { CHAT_MODEL_FACTORY, createChatModel } from './model.factory';
+import { EmbeddingModule } from '../embedding/embedding.module';
 
 @Module({
+  // 引入 EmbeddingModule 以获得 SearchService（语义检索），供 AdvancedAnalysisService 做 RAG
+  imports: [EmbeddingModule],
   controllers: [AdvancedController],
   providers: [
     RunnableMemoryService,

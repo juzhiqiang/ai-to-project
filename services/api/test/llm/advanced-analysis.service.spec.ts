@@ -1,7 +1,8 @@
 import { AdvancedAnalysisService } from '../../src/llm/advanced-analysis.service';
 import type { OrchestratorResult } from '../../src/llm/agents/orchestrator.service';
 
-const SESSION_ID = 'session-ec-001';
+const USER_ID = 'user-ec-001';
+const CONVERSATION_ID = 'conv-ec-001';
 const INPUT = '帮我判断一下能不能退，如果可以请告诉我下一步操作';
 
 const COMPLETED_ORCHESTRATION: OrchestratorResult = {
@@ -10,16 +11,7 @@ const COMPLETED_ORCHESTRATION: OrchestratorResult = {
   usedAgents: ['extractAgent', 'policyCheckAgent', 'riskReviewAgent', 'qaAgent', 'summaryAgent'],
   fallback: null,
   steps: [
-    {
-      agent: 'extractAgent',
-      output: JSON.stringify({
-        orderId: 'EC20240315001',
-        productId: 'P-BT-001',
-        requestType: 'return',
-        receivedDate: '昨天',
-        isUnopened: true,
-      }),
-    },
+    { agent: 'extractAgent', output: '{"orderId":"EC20240315001"}' },
     { agent: 'policyCheckAgent', output: '符合退货条件。' },
     { agent: 'riskReviewAgent', output: '低风险。' },
     { agent: 'qaAgent', output: 'Given 未拆封 When 申请退货 Then 进入退货流程' },
@@ -29,86 +21,100 @@ const COMPLETED_ORCHESTRATION: OrchestratorResult = {
 };
 
 describe('AdvancedAnalysisService', () => {
-  const memoryService = {
-    getHistory: jest.fn(),
-    appendMessage: jest.fn(async () => undefined),
+  // 模拟 Prisma：DbChatMessageHistory 通过 message.findMany 读历史、message.create 写消息
+  const prisma = {
+    message: {
+      findMany: jest.fn(),
+      create: jest.fn(async () => ({})),
+    },
   };
   const orchestratorService = {
     orchestrate: jest.fn(),
   };
-  const filesystemService = {
-    writeFile: jest.fn(async (path: string) => ({ path, written: true })),
+  const searchService = {
+    similaritySearch: jest.fn(),
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    memoryService.getHistory.mockResolvedValue([
-      { type: 'human', content: '我买的蓝牙耳机降噪效果不好' },
-      { type: 'ai', content: '请提供订单号和商品状态' },
-      { type: 'human', content: '订单号 EC20240315001，昨天收到还没拆封' },
+    prisma.message.findMany.mockResolvedValue([
+      { role: 'human', content: '我买的蓝牙耳机降噪效果不好', metadata: null },
+      { role: 'ai', content: '请提供订单号和商品状态', metadata: null },
     ]);
     orchestratorService.orchestrate.mockResolvedValue(COMPLETED_ORCHESTRATION);
+    searchService.similaritySearch.mockResolvedValue([
+      {
+        id: 'chunk-1',
+        documentId: 'doc-policy',
+        content: '退货政策：自签收起 7 天内未拆封可无理由退货。',
+        metadata: null,
+        score: 0.92,
+      },
+    ]);
   });
 
-  it('combines memory, multi-agent analysis, ticket writing, and memory append into one report', async () => {
-    const service = new AdvancedAnalysisService(
-      memoryService as never,
+  function createService() {
+    return new AdvancedAnalysisService(
+      prisma as never,
       orchestratorService as never,
-      filesystemService as never,
+      searchService as never,
     );
+  }
 
-    await expect(service.analyze(SESSION_ID, INPUT)).resolves.toEqual({
-      sessionId: SESSION_ID,
-      input: INPUT,
-      context: expect.stringContaining('human: 我买的蓝牙耳机降噪效果不好'),
-      orchestration: COMPLETED_ORCHESTRATION,
-      ticket: {
-        path: 'tickets/EC20240315001-analysis.md',
-        written: true,
-      },
-      memory: {
-        appended: true,
-      },
-      report: '# 退货判断报告\n建议通过退货申请。',
-    });
+  it('integrates history + RAG retrieval + multi-agent, persists messages, returns full report', async () => {
+    const service = createService();
 
-    expect(memoryService.getHistory).toHaveBeenCalledWith(SESSION_ID);
-    expect(orchestratorService.orchestrate).toHaveBeenCalledWith(
-      expect.stringContaining(`当前输入：\n${INPUT}`),
-    );
-    expect(orchestratorService.orchestrate).toHaveBeenCalledWith(expect.stringContaining('历史上下文：'));
-    expect(filesystemService.writeFile).toHaveBeenCalledWith(
-      'tickets/EC20240315001-analysis.md',
-      '# 退货判断报告\n建议通过退货申请。',
-    );
-    expect(memoryService.appendMessage).toHaveBeenCalledWith(
-      SESSION_ID,
-      INPUT,
-      '# 退货判断报告\n建议通过退货申请。',
-    );
+    const result = await service.analyze(USER_ID, CONVERSATION_ID, INPUT);
+
+    // 语义检索按当前用户与输入触发
+    expect(searchService.similaritySearch).toHaveBeenCalledWith(INPUT, USER_ID, 4);
+
+    // 注入 Orchestrator 的结构化上下文同时包含：检索到的政策文档、历史、当前输入
+    const orchestrateArg = orchestratorService.orchestrate.mock.calls[0][0] as {
+      input: string;
+      policyContext: string;
+    };
+    expect(orchestrateArg.policyContext).toContain('退货政策：自签收起 7 天内未拆封可无理由退货。');
+    expect(orchestrateArg.input).toContain('human: 我买的蓝牙耳机降噪效果不好');
+    expect(orchestrateArg.input).toContain(`当前输入：\n${INPUT}`);
+
+    // 本轮 human 输入与 ai 报告写入 Message 表
+    expect(prisma.message.create).toHaveBeenCalledTimes(2);
+
+    // 返回完整结果
+    expect(result.report).toBe('# 退货判断报告\n建议通过退货申请。');
+    expect(result.usedAgents).toEqual([
+      'extractAgent',
+      'policyCheckAgent',
+      'riskReviewAgent',
+      'qaAgent',
+      'summaryAgent',
+    ]);
+    expect(result.retrievedDocuments).toEqual([
+      {
+        chunkId: 'chunk-1',
+        documentId: 'doc-policy',
+        content: '退货政策：自签收起 7 天内未拆封可无理由退货。',
+        score: 0.92,
+      },
+    ]);
   });
 
-  it('does not write a ticket when clarification is still required', async () => {
-    const clarificationResult: OrchestratorResult = {
+  it('returns a clarification report when orchestration needs more info', async () => {
+    orchestratorService.orchestrate.mockResolvedValue({
       mode: 'clarification',
       clarificationQuestions: ['请提供订单号。'],
       usedAgents: ['extractAgent'],
       fallback: null,
       steps: [{ agent: 'extractAgent', output: '{"orderId":null}' }],
       report: '',
-    };
-    orchestratorService.orchestrate.mockResolvedValue(clarificationResult);
-    const service = new AdvancedAnalysisService(
-      memoryService as never,
-      orchestratorService as never,
-      filesystemService as never,
-    );
+    } satisfies OrchestratorResult);
+    const service = createService();
 
-    const result = await service.analyze(SESSION_ID, '帮我看看能不能退');
+    const result = await service.analyze(USER_ID, CONVERSATION_ID, '帮我看看能不能退');
 
-    expect(result.ticket).toBeNull();
     expect(result.report).toBe('请补充信息：请提供订单号。');
-    expect(filesystemService.writeFile).not.toHaveBeenCalled();
-    expect(memoryService.appendMessage).toHaveBeenCalledWith(SESSION_ID, '帮我看看能不能退', '请补充信息：请提供订单号。');
+    // 即便需澄清，本轮对话仍写入历史
+    expect(prisma.message.create).toHaveBeenCalledTimes(2);
   });
 });

@@ -29,8 +29,11 @@ describe('ChunkService', () => {
     const embeddingService = {
       embedChunks: jest.fn(async () => ({ embedded: 1 })),
     };
+    const sseService = {
+      emit: jest.fn(),
+    };
 
-    const service = new ChunkService(prisma as any, embeddingService as any);
+    const service = new ChunkService(prisma as any, embeddingService as any, sseService as any);
 
     await expect(service.chunkDocument('doc-1', 'user-1')).resolves.toEqual({
       processed: true,

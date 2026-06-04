@@ -1,72 +1,118 @@
 import { Injectable } from '@nestjs/common';
+import { type BaseMessage } from '@langchain/core/messages';
 import { OrchestratorService, type OrchestratorResult } from './agents/orchestrator.service';
-import { FilesystemService, type FileWriteResult } from './filesystem/filesystem.service';
-import { RunnableMemoryService, type MemoryMessage } from './memory/runnable-memory.service';
+import type { CustomerServiceAgentName } from './agents/sub-agents';
+import { PrismaService } from '../prisma/prisma.service';
+import { SearchService, type SimilaritySearchResult } from '../embedding/search.service';
+import { DbChatMessageHistory } from '../conversation/db-chat-history';
 
-export interface AdvancedAnalysisResult {
-  sessionId: string;
-  input: string;
-  context: string;
-  orchestration: OrchestratorResult;
-  ticket: FileWriteResult | null;
-  memory: {
-    appended: boolean;
-  };
-  report: string;
+/** 检索到的文档片段（精简后用于 API 响应） */
+export interface RetrievedDocument {
+  chunkId: string;
+  documentId: string;
+  content: string;
+  score: number;
 }
 
+/** 统一分析结果 */
+export interface AdvancedAnalysisResult {
+  conversationId: string;
+  input: string;
+  report: string;
+  usedAgents: CustomerServiceAgentName[];
+  retrievedDocuments: RetrievedDocument[];
+  orchestration: OrchestratorResult;
+}
+
+/** 语义检索 top-K */
+const RETRIEVAL_TOP_K = 4;
+
+/**
+ * 统一分析服务：整合「会话历史 + RAG 检索 + 多 Agent 编排」的完整链路。
+ *
+ * 调用链：DB 会话历史 → 语义检索用户文档 → 拼接上下文注入 Orchestrator →
+ * 多 Agent 分析 → 结果写回 Message 表 → 返回完整报告。
+ */
 @Injectable()
 export class AdvancedAnalysisService {
   constructor(
-    private readonly memoryService: RunnableMemoryService,
+    private readonly prisma: PrismaService,
     private readonly orchestratorService: OrchestratorService,
-    private readonly filesystemService: FilesystemService,
+    private readonly searchService: SearchService,
   ) {}
 
-  async analyze(sessionId: string, input: string): Promise<AdvancedAnalysisResult> {
-    const history = await this.memoryService.getHistory(sessionId);
-    const context = buildAnalysisContext(history, input);
-    const orchestration = await this.orchestratorService.orchestrate(context);
+  async analyze(
+    userId: string,
+    conversationId: string,
+    input: string,
+  ): Promise<AdvancedAnalysisResult> {
+    // 1. 从数据库读取会话历史（DbChatMessageHistory 基于 Message 表）
+    const history = new DbChatMessageHistory(this.prisma, conversationId);
+    const historyMessages = await history.getMessages();
+
+    // 3. 语义检索当前用户的文档，获取相关上下文
+    const retrieved = await this.searchService.similaritySearch(input, userId, RETRIEVAL_TOP_K);
+
+    // 2 + 4. 拼接历史上下文，并将检索到的政策文档显式注入多 Agent 编排
+    const orchestration = await this.orchestratorService.orchestrate({
+      input: buildConversationInput(historyMessages, input),
+      policyContext: buildPolicyContext(retrieved),
+    });
     const report = buildFinalReport(orchestration);
-    const ticket = await this.writeTicketIfReady(sessionId, orchestration, report);
 
-    await this.memoryService.appendMessage(sessionId, input, report);
+    // 5. 将本轮对话（human 输入 + ai 报告）写入 Message 表
+    await history.addUserMessage(input);
+    await history.addAIMessage(report);
 
+    // 6. 返回完整分析报告
     return {
-      sessionId,
+      conversationId,
       input,
-      context,
-      orchestration,
-      ticket,
-      memory: {
-        appended: true,
-      },
       report,
+      usedAgents: orchestration.usedAgents,
+      retrievedDocuments: retrieved.map((row) => ({
+        chunkId: row.id,
+        documentId: row.documentId,
+        content: row.content,
+        score: row.score,
+      })),
+      orchestration,
     };
   }
-
-  private async writeTicketIfReady(sessionId: string, orchestration: OrchestratorResult, report: string) {
-    if (orchestration.mode !== 'completed' || !report) {
-      return null;
-    }
-
-    const ticketPath = buildTicketPath(sessionId, orchestration);
-
-    return this.filesystemService.writeFile(ticketPath, report);
-  }
 }
 
-function buildAnalysisContext(history: MemoryMessage[], input: string) {
-  const historyContext = history.length > 0 ? history.map(formatHistoryMessage).join('\n') : '无历史上下文';
+/**
+ * 拼接历史上下文和当前输入，供抽取、风控、摘要 Agent 看到完整对话。
+ */
+function buildConversationInput(history: BaseMessage[], input: string): string {
+  const historyContext =
+    history.length > 0
+      ? history.map((message) => `${message.getType()}: ${messageText(message)}`).join('\n')
+      : '无历史上下文';
 
-  return ['历史上下文：', historyContext, '', '当前输入：', input].join('\n');
+  return [
+    '历史上下文：',
+    historyContext,
+    '',
+    '当前输入：',
+    input,
+  ].join('\n');
 }
 
-function formatHistoryMessage(message: MemoryMessage) {
-  return `${message.type}: ${message.content}`;
+/**
+ * 单独构造 RAG 政策上下文，显式传入 policyCheckAgent / summaryAgent 等。
+ */
+function buildPolicyContext(retrieved: SimilaritySearchResult[]): string {
+  return retrieved.length > 0
+    ? retrieved.map((row, index) => `【参考文档 ${index + 1}】\n${row.content}`).join('\n\n')
+    : '无相关政策文档';
 }
 
-function buildFinalReport(orchestration: OrchestratorResult) {
+function messageText(message: BaseMessage): string {
+  return typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+}
+
+function buildFinalReport(orchestration: OrchestratorResult): string {
   if (orchestration.mode === 'clarification') {
     return `请补充信息：${orchestration.clarificationQuestions.join('；')}`;
   }
@@ -76,44 +122,4 @@ function buildFinalReport(orchestration: OrchestratorResult) {
   }
 
   return orchestration.report;
-}
-
-function buildTicketPath(sessionId: string, orchestration: OrchestratorResult) {
-  const orderId = extractOrderId(orchestration);
-  const fileStem = sanitizePathSegment(orderId ?? sessionId);
-
-  return `tickets/${fileStem}-analysis.md`;
-}
-
-function extractOrderId(orchestration: OrchestratorResult) {
-  const extractStep = orchestration.steps.find((step) => step.agent === 'extractAgent');
-
-  if (!extractStep) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(stripJsonFence(extractStep.output)) as unknown;
-
-    if (parsed && typeof parsed === 'object' && 'orderId' in parsed && typeof parsed.orderId === 'string') {
-      return parsed.orderId;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
-
-function stripJsonFence(output: string) {
-  const trimmed = output.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-
-  return fenced ? fenced[1].trim() : trimmed;
-}
-
-function sanitizePathSegment(value: string) {
-  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-
-  return sanitized || 'unknown-session';
 }
