@@ -7,7 +7,6 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
-  ParseFilePipeBuilder,
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
@@ -16,6 +15,7 @@ import { DocumentService } from './document.service';
 import { ChunkService } from './chunk.service';
 import { UserIdGuard } from '../auth/user-id.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { DocumentFilePipe } from './document-file.pipe';
 
 @UseGuards(UserIdGuard)
 @Controller('api/documents')
@@ -34,22 +34,7 @@ export class DocumentController {
   @UseInterceptors(FileInterceptor('file'))
   upload(
     @CurrentUser() userId: string,
-    @UploadedFile(
-      new ParseFilePipeBuilder()
-        .addFileTypeValidator({
-          // 支持 text/plain, text/markdown, application/pdf, doc, docx
-          fileType: /(text\/plain|text\/markdown|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)/,
-          // 纯文本（txt/md）没有 magic number，file-type 无法识别 → 检测不出时回退到
-          // 请求声明的 mimetype 比较；pdf/doc/docx 仍走 magic number 内容校验。
-          fallbackToMimetype: true,
-        })
-        .addMaxSizeValidator({
-          maxSize: 10 * 1024 * 1024, // 10 MB
-        })
-        .build({
-          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
-        }),
-    )
+    @UploadedFile(DocumentFilePipe)
     file: Express.Multer.File,
   ) {
     return this.documentService.upload(userId, file);

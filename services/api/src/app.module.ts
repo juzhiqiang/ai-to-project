@@ -8,9 +8,10 @@ import { UserModule } from './user/user.module';
 import { DocumentModule } from './document/document.module';
 import { EmbeddingModule } from './embedding/embedding.module';
 import { SseModule } from './sse/sse.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, LlmModule, AdvancedModule, ConversationModule, UserModule, DocumentModule, EmbeddingModule, SseModule],
+  imports: [PrismaModule, AuthModule, LlmModule, AdvancedModule, ConversationModule, UserModule, DocumentModule, EmbeddingModule, SseModule],
   controllers: [AppController],
   providers: [],
 })
