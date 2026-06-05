@@ -1,0 +1,170 @@
+import { Inject, Injectable } from '@nestjs/common';
+import type { BaseMessage } from '@langchain/core/messages';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { CHAT_MODEL_FACTORY, type ChatModelFactory } from '../model.factory';
+import { aiUIResponseSchema, type AIUIResponse } from './ui-schemas';
+
+interface StructuredUIModel {
+  withStructuredOutput(schema: typeof aiUIResponseSchema): {
+    invoke(messages: BaseMessage[]): Promise<AIUIResponse>;
+  };
+}
+
+const UI_SYSTEM_PROMPT = [
+  '你是需求分析系统的 UI 响应编排器。',
+  '你必须输出符合 aiUIResponseSchema 的结构化 JSON，不输出额外解释。',
+  '组件选择指南：',
+  '- text：用于纯文本或 Markdown 说明。',
+  '- selection：用户要新建需求、选择需求类型、选择下一步处理路径时使用。',
+  '- form：需要收集需求标题、描述、优先级、截止日期、估算等字段时使用。',
+  '- confirmation：用户提交需求分析、删除、发布、触发工作流等需要二次确认时使用。',
+  '- card：展示单个需求、订单、商品、用户等详情时使用。',
+  '- steps：展示需求分析流程、审批流程或处理进度时使用。',
+  '- table：批量展示需求列表、任务列表、分析结果列表时使用。',
+  '- action_buttons：提供提交分析、继续补充、查看详情、取消等操作按钮时使用。',
+  '业务域是需求分析系统，组件字段要可直接被前端渲染。',
+].join('\n');
+
+@Injectable()
+export class UIResponseService {
+  private readonly prompt = ChatPromptTemplate.fromMessages([
+    ['system', UI_SYSTEM_PROMPT],
+    [
+      'human',
+      [
+        '用户输入：{input}',
+        '历史上下文：{history}',
+        '业务上下文：{context}',
+        '请返回一个包含 message 和 components 的结构化 UI 响应。',
+      ].join('\n'),
+    ],
+  ]);
+
+  constructor(
+    @Inject(CHAT_MODEL_FACTORY)
+    private readonly createChatModel: ChatModelFactory,
+  ) {}
+
+  async generateUIResponse(
+    input: string,
+    history: string[] = [],
+    context: Record<string, unknown> = {},
+  ): Promise<AIUIResponse> {
+    try {
+      const messages = await this.prompt.formatMessages({
+        input,
+        history: history.length > 0 ? history.join('\n') : '无',
+        context: Object.keys(context).length > 0 ? JSON.stringify(context) : '无',
+      });
+      const model = this.createChatModel() as unknown as StructuredUIModel;
+      const structuredModel = model.withStructuredOutput(aiUIResponseSchema);
+      const result = await structuredModel.invoke(messages);
+
+      return aiUIResponseSchema.parse(result);
+    } catch {
+      return fallbackUIResponse(input);
+    }
+  }
+}
+
+function fallbackUIResponse(input: string): AIUIResponse {
+  const requirementId = input.match(/REQ-\d{8}-\d{3}/i)?.[0]?.toUpperCase();
+
+  if (requirementId) {
+    return requirementCardResponse(requirementId);
+  }
+
+  if (/(新需求|提一个需求|创建需求|我要提)/.test(input)) {
+    return requirementTypeSelectionResponse();
+  }
+
+  if (/(提交需求分析|提交分析|开始分析)/.test(input)) {
+    return requirementSubmitResponse('待提交需求');
+  }
+
+  return {
+    message: '我可以帮你创建、查看或提交需求分析。',
+    components: [
+      {
+        type: 'text',
+        id: 'ui-help',
+        content: '请告诉我你要新建需求、查看需求编号，还是提交需求分析。',
+      },
+    ],
+  };
+}
+
+export function requirementTypeSelectionResponse(): AIUIResponse {
+  return {
+    message: '请选择这次要提交的需求类型。',
+    components: [
+      {
+        type: 'selection',
+        id: 'requirement-type',
+        title: '选择需求类型',
+        description: '不同类型会生成不同的后续表单和分析流程。',
+        mode: 'single',
+        options: [
+          { label: '新功能', value: 'feature', description: '新增业务能力或用户流程' },
+          { label: '缺陷修复', value: 'bugfix', description: '修复线上或测试发现的问题' },
+          { label: '体验优化', value: 'optimization', description: '改善已有功能的效率或体验' },
+        ],
+      },
+    ],
+  };
+}
+
+export function requirementCardResponse(requirementId: string): AIUIResponse {
+  return {
+    message: `已找到需求 ${requirementId} 的概览信息。`,
+    components: [
+      {
+        type: 'card',
+        id: `requirement-${requirementId}`,
+        title: requirementId,
+        subtitle: '需求详情卡片',
+        fields: [
+          { label: '状态', value: '分析中' },
+          { label: '优先级', value: '高' },
+          { label: '负责人', value: '产品团队' },
+          { label: '当前阶段', value: '需求澄清' },
+        ],
+        actions: [
+          {
+            label: '提交需求分析',
+            variant: 'primary',
+            action: { type: 'button_click', componentId: `requirement-${requirementId}`, value: 'submit_analysis' },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+export function requirementSubmitResponse(title: string): AIUIResponse {
+  return {
+    message: '提交前请确认需求分析内容和处理流程。',
+    components: [
+      {
+        type: 'confirmation',
+        id: 'confirm-requirement-analysis',
+        title: '确认提交需求分析',
+        summary: [`需求：${title}`, '提交后将进入自动分析与人工复核流程。'],
+        confirmLabel: '确认提交',
+        cancelLabel: '返回修改',
+        action: { type: 'confirmation', componentId: 'confirm-requirement-analysis', value: true },
+      },
+      {
+        type: 'steps',
+        id: 'requirement-analysis-steps',
+        current: 1,
+        steps: [
+          { label: '填写需求', status: 'completed' },
+          { label: '提交确认', status: 'current' },
+          { label: '智能分析', status: 'pending' },
+          { label: '生成报告', status: 'pending' },
+        ],
+      },
+    ],
+  };
+}

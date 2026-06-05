@@ -12,8 +12,10 @@ import { MemoryController } from './memory/memory.controller';
 import { RunnableMemoryService } from './memory/runnable-memory.service';
 import { CHAT_MODEL_FACTORY, createChatModel } from './model.factory';
 import { RequirementService } from './requirement.service';
+import { UIProtocolModule } from './ui-protocol/ui-protocol.module';
 
 @Module({
+  imports: [UIProtocolModule],
   controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController],
   providers: [
     LlmService,
