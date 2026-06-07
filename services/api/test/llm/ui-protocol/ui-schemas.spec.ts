@@ -99,13 +99,15 @@ describe('UI protocol schemas', () => {
     expect(
       uiActionSchema.parse({
         type: 'form_submit',
+        componentType: 'form',
         componentId: 'requirement-form',
-        value: { title: '支付流程优化', priority: 'high' },
+        payload: { title: '支付流程优化', priority: 'high' },
       }),
     ).toEqual({
       type: 'form_submit',
+      componentType: 'form',
       componentId: 'requirement-form',
-      value: { title: '支付流程优化', priority: 'high' },
+      payload: { title: '支付流程优化', priority: 'high' },
     });
   });
 });

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "bun --bun next dev",
+    "dev": "bun --bun next dev --webpack",
     "build": "bun --bun next build",
     "start": "bun --bun next start",
     "typecheck": "bun --bun tsc --noEmit",
-    "test": "node --test routing.test.mjs"
+    "test": "node --test *.test.mjs"
   },
   "dependencies": {
     "@repo/contracts": "workspace:*",

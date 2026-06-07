@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import request = require('supertest');
 import { UIActionService } from '../../../src/llm/ui-protocol/ui-action.service';
 import { UIChatController } from '../../../src/llm/ui-protocol/ui-chat.controller';
+import { UIProtocolModule } from '../../../src/llm/ui-protocol/ui-protocol.module';
 import { UIResponseService } from '../../../src/llm/ui-protocol/ui-response.service';
 
 const UI_RESPONSE = {
@@ -77,6 +78,46 @@ describe('UIChatController', () => {
       });
 
     expect(uiActionService.handleAction).toHaveBeenCalledWith(action, { sessionId: 'session-1' });
+    await app.close();
+  });
+});
+
+describe('UIChatController with UIProtocolModule', () => {
+  async function createRealApp() {
+    const moduleRef = await Test.createTestingModule({
+      imports: [UIProtocolModule],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    return app;
+  }
+
+  it('POST /api/ui-chat/action accepts compact component action payloads', async () => {
+    const app = await createRealApp();
+    const sessionId = 'session-chat-real';
+
+    await request(app.getHttpServer())
+      .post('/api/ui-chat/chat')
+      .send({ sessionId, input: 'create a new requirement for excel import' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/ui-chat/action')
+      .send({
+        sessionId,
+        action: {
+          componentType: 'selection',
+          payload: { type: 'select', selectedId: 'functional' },
+        },
+      })
+      .expect(201)
+      .expect((response) => {
+        expect(response.body.components[0]).toEqual(
+          expect.objectContaining({ type: 'form', id: 'requirement-detail-form' }),
+        );
+      });
+
     await app.close();
   });
 });

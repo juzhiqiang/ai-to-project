@@ -3,6 +3,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { CHAT_MODEL_FACTORY, type ChatModelFactory } from '../model.factory';
 import { aiUIResponseSchema, type AIUIResponse } from './ui-schemas';
+import { UIFlowService } from './ui-flow.service';
 
 interface StructuredUIModel {
   withStructuredOutput(schema: typeof aiUIResponseSchema): {
@@ -10,6 +11,7 @@ interface StructuredUIModel {
   };
 }
 
+// System prompt 明确组件选择规则，让模型不仅输出 JSON，还能按业务场景挑组件。
 const UI_SYSTEM_PROMPT = [
   '你是需求分析系统的 UI 响应编排器。',
   '你必须输出符合 aiUIResponseSchema 的结构化 JSON，不输出额外解释。',
@@ -27,6 +29,7 @@ const UI_SYSTEM_PROMPT = [
 
 @Injectable()
 export class UIResponseService {
+  // Prompt 输入保留 history/context，是为了后续把会话状态和业务数据注入 UI 编排。
   private readonly prompt = ChatPromptTemplate.fromMessages([
     ['system', UI_SYSTEM_PROMPT],
     [
@@ -43,6 +46,7 @@ export class UIResponseService {
   constructor(
     @Inject(CHAT_MODEL_FACTORY)
     private readonly createChatModel: ChatModelFactory,
+    private readonly uiFlowService: UIFlowService,
   ) {}
 
   async generateUIResponse(
@@ -50,6 +54,10 @@ export class UIResponseService {
     history: string[] = [],
     context: Record<string, unknown> = {},
   ): Promise<AIUIResponse> {
+    if (isRequirementCreationIntent(input) && typeof context.sessionId === 'string') {
+      return this.uiFlowService.startRequirementFlow(context.sessionId, input);
+    }
+
     try {
       const messages = await this.prompt.formatMessages({
         input,
@@ -60,13 +68,16 @@ export class UIResponseService {
       const structuredModel = model.withStructuredOutput(aiUIResponseSchema);
       const result = await structuredModel.invoke(messages);
 
+      // 即使模型声明了 structured output，也再 parse 一次，守住 API 输出边界。
       return aiUIResponseSchema.parse(result);
     } catch {
+      // 模型不可用或输出不合规时，仍按核心业务意图返回可渲染 UI。
       return fallbackUIResponse(input);
     }
   }
 }
 
+// fallback 覆盖 6.0 的验收场景，并让接口在模型异常时仍能稳定服务前端。
 function fallbackUIResponse(input: string): AIUIResponse {
   const requirementId = input.match(/REQ-\d{8}-\d{3}/i)?.[0]?.toUpperCase();
 
@@ -74,7 +85,7 @@ function fallbackUIResponse(input: string): AIUIResponse {
     return requirementCardResponse(requirementId);
   }
 
-  if (/(新需求|提一个需求|创建需求|我要提)/.test(input)) {
+  if (isRequirementCreationIntent(input)) {
     return requirementTypeSelectionResponse();
   }
 
@@ -83,17 +94,53 @@ function fallbackUIResponse(input: string): AIUIResponse {
   }
 
   return {
-    message: '我可以帮你创建、查看或提交需求分析。',
+    message: '请选择一个常用服务。',
     components: [
       {
-        type: 'text',
-        id: 'ui-help',
-        content: '请告诉我你要新建需求、查看需求编号，还是提交需求分析。',
+        type: 'action_buttons',
+        id: 'common-service-actions',
+        actions: [
+          {
+            label: '提交新需求',
+            variant: 'primary',
+            action: {
+              type: 'button_click',
+              componentType: 'action_buttons',
+              componentId: 'common-service-actions',
+              payload: 'create_requirement',
+            },
+          },
+          {
+            label: '查看需求进度',
+            variant: 'secondary',
+            action: {
+              type: 'button_click',
+              componentType: 'action_buttons',
+              componentId: 'common-service-actions',
+              payload: 'view_progress',
+            },
+          },
+          {
+            label: '提交需求分析',
+            variant: 'secondary',
+            action: {
+              type: 'button_click',
+              componentType: 'action_buttons',
+              componentId: 'common-service-actions',
+              payload: 'submit_analysis',
+            },
+          },
+        ],
       },
     ],
   };
 }
 
+function isRequirementCreationIntent(input: string) {
+  return /(新需求|提一个需求|创建需求|我要提)/.test(input);
+}
+
+/** 新建需求入口：先让用户选择需求类型，再进入动态表单。 */
 export function requirementTypeSelectionResponse(): AIUIResponse {
   return {
     message: '请选择这次要提交的需求类型。',
@@ -114,6 +161,7 @@ export function requirementTypeSelectionResponse(): AIUIResponse {
   };
 }
 
+/** 需求详情展示：用 card 承载单个需求对象和后续动作。 */
 export function requirementCardResponse(requirementId: string): AIUIResponse {
   return {
     message: `已找到需求 ${requirementId} 的概览信息。`,
@@ -141,6 +189,7 @@ export function requirementCardResponse(requirementId: string): AIUIResponse {
   };
 }
 
+/** 提交需求分析前的确认 UI，同时展示流程进度。 */
 export function requirementSubmitResponse(title: string): AIUIResponse {
   return {
     message: '提交前请确认需求分析内容和处理流程。',

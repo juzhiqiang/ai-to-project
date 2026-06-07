@@ -14,3 +14,8 @@ test("next rewrites the requirement route to the API service", () => {
   assert.match(nextConfigSource, /source:\s*"\/requirement\/:path\*"/);
   assert.match(nextConfigSource, /destination:.*\/requirement\/:path\*/s);
 });
+
+test("next preserves the API prefix when proxying API routes", () => {
+  assert.match(nextConfigSource, /source:\s*"\/api\/:path\*"/);
+  assert.match(nextConfigSource, /destination:.*\/api\/:path\*/s);
+});

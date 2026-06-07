@@ -1,26 +1,42 @@
 import { Injectable } from '@nestjs/common';
 import { type AIUIResponse, type UIAction, uiActionSchema } from './ui-schemas';
+import { UIActionHandler } from './ui-action.handler';
+import { actionPayload } from './ui-flow.service';
 import { requirementSubmitResponse, requirementTypeSelectionResponse } from './ui-response.service';
 import type { UISessionContext } from './ui-types';
 
 @Injectable()
 export class UIActionService {
-  async handleAction(action: UIAction, sessionContext: UISessionContext): Promise<AIUIResponse> {
+  constructor(private readonly uiActionHandler?: UIActionHandler) {}
+
+  /**
+   * 处理前端组件回传动作，并生成下一步 UI。
+   * 当前实现先覆盖需求分析流程的核心动作，后续可按 componentId 扩展更多业务分支。
+   */
+  async handleAction(action: UIAction | Record<string, unknown>, sessionContext: UISessionContext): Promise<AIUIResponse> {
+    if (this.uiActionHandler) {
+      return this.uiActionHandler.handle(action, sessionContext);
+    }
+
     const parsedAction = uiActionSchema.parse(action);
 
+    // 选择需求类型后，下一步收集需求详情。
     if (parsedAction.type === 'selection' && parsedAction.componentId === 'requirement-type') {
-      return requirementFormResponse(String(parsedAction.value), sessionContext.sessionId);
+      return requirementFormResponse(String(actionPayload(parsedAction)), sessionContext.sessionId);
     }
 
+    // 表单提交后，先返回 confirmation，避免直接触发不可撤销流程。
     if (parsedAction.type === 'form_submit' && parsedAction.componentId === 'requirement-form') {
-      return requirementSubmitResponse(formTitle(parsedAction.value));
+      return requirementSubmitResponse(formTitle(actionPayload(parsedAction)));
     }
 
+    // confirmation 的 true/false 决定进入分析流程或返回修改。
     if (parsedAction.type === 'confirmation') {
-      return confirmationNextStepResponse(Boolean(parsedAction.value));
+      return confirmationNextStepResponse(Boolean(actionPayload(parsedAction)));
     }
 
-    if (parsedAction.type === 'button_click' && parsedAction.value === 'submit_analysis') {
+    // 从卡片或按钮组触发的提交分析动作。
+    if (parsedAction.type === 'button_click' && actionPayload(parsedAction) === 'submit_analysis') {
       return requirementSubmitResponse('已选需求');
     }
 
@@ -28,6 +44,7 @@ export class UIActionService {
   }
 }
 
+// 需求表单字段贴近需求分析系统：标题、优先级、描述、期望日期和预估人天。
 function requirementFormResponse(requirementType: string, sessionId: string): AIUIResponse {
   return {
     message: '请补充需求信息，我会据此生成结构化分析。',
@@ -60,6 +77,7 @@ function requirementFormResponse(requirementType: string, sessionId: string): AI
   };
 }
 
+// 根据用户是否确认提交，分别返回流程推进或取消后的动作入口。
 function confirmationNextStepResponse(confirmed: boolean): AIUIResponse {
   if (!confirmed) {
     return {
@@ -103,6 +121,7 @@ function confirmationNextStepResponse(confirmed: boolean): AIUIResponse {
   };
 }
 
+// form_submit 的 value 是 unknown，这里只安全读取 title 字段。
 function formTitle(value: unknown): string {
   if (value && typeof value === 'object' && 'title' in value && typeof value.title === 'string') {
     return value.title;
@@ -111,6 +130,7 @@ function formTitle(value: unknown): string {
   return '未命名需求';
 }
 
+// 把内部枚举值转成用户可读文案。
 function requirementTypeLabel(type: string) {
   const labels: Record<string, string> = {
     feature: '新功能',
