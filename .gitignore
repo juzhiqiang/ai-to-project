@@ -6,6 +6,10 @@ dist/
 .next/
 *.tsbuildinfo
 
+# Git worktrees
+.worktrees/
+worktrees/
+
 # Turborepo cache
 .turbo/
 
