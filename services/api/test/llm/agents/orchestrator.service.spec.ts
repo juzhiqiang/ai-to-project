@@ -1,6 +1,7 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { RunnableLambda } from '@langchain/core/runnables';
 import { OrchestratorService } from '../../../src/llm/agents/orchestrator.service';
+import * as requirementAnalysisGraph from '../../../src/llm/graph/requirement-analysis-graph';
 import type { ChatModelFactory, ChatModelLike } from '../../../src/llm/model.factory';
 
 const CUSTOMER_INPUT = '我买的蓝牙耳机降噪效果不好，订单号 EC20240315001，昨天收到还没拆封，想退货';
@@ -89,6 +90,10 @@ describe('OrchestratorService', () => {
     const result = await service.orchestrate(CUSTOMER_INPUT);
 
     expect(result).toEqual({
+      intent: 'analyze',
+      reasoning: 'fallback: defaulted to analyze',
+      queryResponse: null,
+      chatResponse: null,
       mode: 'completed',
       clarificationQuestions: [],
       usedAgents: ['extractAgent', 'policyCheckAgent', 'riskReviewAgent', 'qaAgent', 'summaryAgent'],
@@ -190,5 +195,37 @@ describe('OrchestratorService', () => {
         steps: [expect.objectContaining({ agent: 'extractAgent' })],
       }),
     );
+  });
+
+  it('passes the chat model through to the analysis graph for routing decisions', async () => {
+    const model = RunnableLambda.from(async () => new AIMessage('router-model'));
+    const factory = jest.fn(() => model) as unknown as ChatModelFactory;
+    const service = new OrchestratorService(factory);
+    const spy = jest.spyOn(requirementAnalysisGraph, 'runAnalysisGraph').mockResolvedValue({
+      mode: 'completed',
+      clarificationQuestions: [],
+      usedAgents: [],
+      fallback: null,
+      steps: [],
+      report: '',
+    });
+
+    try {
+      await service.orchestrate({
+        input: '查询 REQ-20240315-001 的当前状态',
+        policyContext: '无相关政策文档',
+      });
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: '查询 REQ-20240315-001 的当前状态',
+          policyContext: '无相关政策文档',
+          agents: expect.any(Object),
+          model,
+        }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

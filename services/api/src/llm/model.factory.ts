@@ -11,6 +11,9 @@ export interface ChatModelLike {
   invoke(messages: BaseMessage[]): Promise<ModelResponseLike>;
   batch(messageBatches: BaseMessage[][]): Promise<ModelResponseLike[]>;
   stream(messages: BaseMessage[]): Promise<AsyncIterable<ModelResponseLike>> | AsyncIterable<ModelResponseLike>;
+  withStructuredOutput?<Schema>(schema: Schema): {
+    invoke(messages: BaseMessage[]): Promise<unknown>;
+  };
 }
 
 export type ChatModelFactory = () => ChatModelLike;

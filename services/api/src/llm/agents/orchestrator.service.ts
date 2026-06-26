@@ -27,16 +27,18 @@ export class OrchestratorService {
 
   async orchestrate(request: string | OrchestratorInput): Promise<OrchestratorResult> {
     const { input, policyContext } = normalizeOrchestratorInput(request);
+    const model = this.createChatModel();
 
     return runAnalysisGraph({
       input,
       policyContext,
-      agents: this.buildAgents(),
+      agents: this.buildAgents(model),
+      model,
     });
   }
 
-  private buildAgents(): CustomerServiceAgents {
-    return buildCustomerServiceAgents(this.createChatModel() as unknown as CustomerServiceAgentModel);
+  private buildAgents(model: ReturnType<ChatModelFactory>): CustomerServiceAgents {
+    return buildCustomerServiceAgents(model as unknown as CustomerServiceAgentModel);
   }
 }
 

@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { type BaseMessage } from '@langchain/core/messages';
 import { OrchestratorService, type OrchestratorResult } from './agents/orchestrator.service';
-import type { CustomerServiceAgentName } from './agents/sub-agents';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService, type SimilaritySearchResult } from '../embedding/search.service';
 import { DbChatMessageHistory } from '../conversation/db-chat-history';
@@ -19,7 +18,7 @@ export interface AdvancedAnalysisResult {
   conversationId: string;
   input: string;
   report: string;
-  usedAgents: CustomerServiceAgentName[];
+  usedAgents: OrchestratorResult['usedAgents'];
   retrievedDocuments: RetrievedDocument[];
   orchestration: OrchestratorResult;
 }

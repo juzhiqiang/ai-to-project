@@ -34,12 +34,24 @@ function createScriptedAgents(): CustomerServiceAgents {
   } as unknown as CustomerServiceAgents;
 }
 
+function createRouterModel(
+  route: { intent: 'analyze' | 'query' | 'chat'; reasoning: string } | Error,
+  reply: string,
+) {
+  return {
+    withStructuredOutput: jest.fn(() => ({
+      invoke: route instanceof Error ? jest.fn().mockRejectedValue(route) : jest.fn().mockResolvedValue(route),
+    })),
+    invoke: jest.fn().mockResolvedValue({ content: reply }),
+  } as any;
+}
+
 describe('requirement analysis graph', () => {
   it('keeps the Ch6 agent entry as a graph delegate', () => {
     expect(runAnalysisGraphFromAgentEntry).toBe(runAnalysisGraph);
   });
 
-  it('compiles the five-stage graph in the task order', () => {
+  it('compiles the router plus five-stage analyze graph in the task order', () => {
     const graph = createAnalysisGraph();
     const graphShape = graph.getGraph();
     const edges = graphShape.edges.map(({ source, target, conditional }) => ({
@@ -54,12 +66,17 @@ describe('requirement analysis graph', () => {
 
     expect(sortEdges(edges)).toEqual(
       sortEdges([
-        { source: '__start__', target: 'extract', conditional: false },
+        { source: '__start__', target: 'classifier', conditional: false },
+        { source: 'classifier', target: 'extract', conditional: true },
+        { source: 'classifier', target: 'queryHandler', conditional: true },
+        { source: 'classifier', target: 'chatHandler', conditional: true },
         { source: 'clarify', target: 'analysis_step', conditional: false },
         { source: 'analysis_step', target: 'risk_step', conditional: false },
         { source: 'extract', target: 'clarify', conditional: false },
         { source: 'risk_step', target: 'summary_step', conditional: false },
         { source: 'summary_step', target: '__end__', conditional: false },
+        { source: 'queryHandler', target: '__end__', conditional: false },
+        { source: 'chatHandler', target: '__end__', conditional: false },
       ]),
     );
   });
@@ -103,6 +120,10 @@ describe('requirement analysis graph', () => {
     });
 
     expect(result).toEqual({
+      intent: 'analyze',
+      reasoning: 'fallback: defaulted to analyze',
+      queryResponse: null,
+      chatResponse: null,
       mode: 'completed',
       clarificationQuestions: [],
       usedAgents: ['extractAgent', 'policyCheckAgent', 'riskReviewAgent', 'qaAgent', 'summaryAgent'],
@@ -116,5 +137,87 @@ describe('requirement analysis graph', () => {
       ],
       report: '# 退货判断报告\n建议通过退货申请。',
     });
+  });
+
+  it('routes query inputs to the query handler without running the analyze chain', async () => {
+    const agents = createScriptedAgents();
+    const model = createRouterModel(
+      { intent: 'query', reasoning: 'contains a request id and a status question' },
+      '查询结果：REQ-20240315-001 当前状态为处理中。',
+    );
+
+    const result = (await runAnalysisGraph({
+      input: '查询 REQ-20240315-001 的当前状态',
+      policyContext: '无相关政策文档',
+      agents,
+      model,
+    } as any)) as any;
+
+    expect(result.intent).toBe('query');
+    expect(result.queryResponse).toContain('处理中');
+    expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.policyCheckAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.riskReviewAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.qaAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.summaryAgent.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes chat inputs to the chat handler without running business nodes in under five seconds', async () => {
+    const agents = createScriptedAgents();
+    const model = createRouterModel(
+      { intent: 'chat', reasoning: 'small talk' },
+      '你好，我在。需要时可以继续告诉我你的需求。',
+    );
+    const startedAt = Date.now();
+
+    const result = (await runAnalysisGraph({
+      input: '你好，今天天气不错',
+      policyContext: '无相关政策文档',
+      agents,
+      model,
+    } as any)) as any;
+
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(result).toEqual(
+      expect.objectContaining({
+        intent: 'chat',
+        chatResponse: expect.stringContaining('你好'),
+        report: expect.stringContaining('你好'),
+      }),
+    );
+    expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.policyCheckAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.riskReviewAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.qaAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.summaryAgent.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ambiguous request id problem check', '看看 REQ-20240315-001 有没有什么问题', 'query'],
+    ['request id progress question', 'REQ-20240415-002 的进度如何', 'query'],
+    ['short new requirement', '我需要一个用户登录功能', 'analyze'],
+    ['query analysis report boundary case', '查询 REQ-20240315-001 的风险分析报告', 'query'],
+  ] as const)('falls back to keyword routing for %s', async (_name, input, expectedIntent) => {
+    const agents = createScriptedAgents();
+    const model = createRouterModel(new Error('structured output unavailable'), '降级路由回复。');
+
+    const result = (await runAnalysisGraph({
+      input,
+      policyContext: '无相关政策文档',
+      agents,
+      model,
+    } as any)) as any;
+
+    expect(result.intent).toBe(expectedIntent);
+    expect(result.reasoning).toContain('fallback');
+
+    if (expectedIntent === 'query') {
+      expect(result.queryResponse).toBe('降级路由回复。');
+      expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
+    } else {
+      expect(result.analysis).toBeUndefined();
+      expect(agents.extractAgent.invoke).toHaveBeenCalled();
+      expect(result.report).toBe('# 退货判断报告\n建议通过退货申请。');
+    }
   });
 });
