@@ -1,6 +1,6 @@
 llm:
   provider: openai
-  model: ep-hi0i5y-1779174547802370491
+  model: gpt-5.5
   temperature: 0
   maxTokens: 4096
 retrieval:
