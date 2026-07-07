@@ -17,6 +17,7 @@ const COMPLETED_ORCHESTRATION: OrchestratorResult = {
     { agent: 'qaAgent', output: 'Given 未拆封 When 申请退货 Then 进入退货流程' },
     { agent: 'summaryAgent', output: '# 退货判断报告\n建议通过退货申请。' },
   ],
+  graphTrace: [],
   report: '# 退货判断报告\n建议通过退货申请。',
 };
 
@@ -107,6 +108,7 @@ describe('AdvancedAnalysisService', () => {
       usedAgents: ['extractAgent'],
       fallback: null,
       steps: [{ agent: 'extractAgent', output: '{"orderId":null}' }],
+      graphTrace: [],
       report: '',
     } satisfies OrchestratorResult);
     const service = createService();

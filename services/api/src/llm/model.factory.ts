@@ -23,6 +23,7 @@ export const CHAT_MODEL_FACTORY = Symbol('CHAT_MODEL_FACTORY');
 export function createChatModel(): ChatModelLike {
   const config = loadLangChainConfig();
   const apiKeys = getApiKeys();
+  const baseURL = normalizeOpenAiBaseUrl(apiKeys.openAiBaseUrl);
 
   return new ChatOpenAI({
     model: config.llm.model,
@@ -30,7 +31,17 @@ export function createChatModel(): ChatModelLike {
     maxTokens: config.llm.maxTokens,
     apiKey: apiKeys.openAiApiKey,
     configuration: {
-      baseURL: apiKeys.openAiBaseUrl,
+      baseURL,
     },
   });
+}
+
+export function normalizeOpenAiBaseUrl(baseUrl: string) {
+  const normalized = baseUrl.trim().replace(/\/+$/, '');
+
+  if (/\/v1$/i.test(normalized)) {
+    return normalized;
+  }
+
+  return `${normalized}/v1`;
 }

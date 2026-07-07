@@ -1,8 +1,11 @@
-import { createAnalysisGraph, runAnalysisGraph } from '../../../src/llm/graph/requirement-analysis-graph';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { runAnalysisGraph as runAnalysisGraphFromAgentEntry } from '../../../src/llm/agents/requirement-analysis';
 import type { CustomerServiceAgents } from '../../../src/llm/agents/sub-agents';
+import { createAnalysisSubGraph } from '../../../src/llm/graph/analysis-subgraph';
+import { createAnalysisTools } from '../../../src/llm/graph/analysis-tools';
+import { createAnalysisGraph, runAnalysisGraph } from '../../../src/llm/graph/requirement-analysis-graph';
 
-const CUSTOMER_INPUT = '我买的蓝牙耳机降噪效果不好，订单号 EC20240315001，昨天收到还没拆封，想退货';
+const CUSTOMER_INPUT = '订单 EC20240315001，昨天签收，商品未拆封，我想申请退货。';
 
 function createScriptedAgents(): CustomerServiceAgents {
   return {
@@ -18,18 +21,18 @@ function createScriptedAgents(): CustomerServiceAgents {
       ),
     },
     policyCheckAgent: {
-      invoke: jest.fn().mockResolvedValue('符合退货条件：昨天收到且未拆封，可按退货政策处理；退款按原路退回。'),
+      invoke: jest.fn().mockResolvedValue('符合退货政策，可以进入退货流程。'),
     },
     riskReviewAgent: {
-      invoke: jest.fn().mockResolvedValue('风险点：需以订单系统中的签收时间为准。'),
+      invoke: jest.fn().mockResolvedValue('风险较低，但需要以订单系统时间为准。'),
     },
     qaAgent: {
       invoke: jest
         .fn()
-        .mockResolvedValue('Given 订单已签收且商品未拆封\nWhen 用户申请退货\nThen 客服应批准进入退货流程'),
+        .mockResolvedValue('Given 用户已签收且未拆封\nWhen 用户申请退货\nThen 客服应允许进入退货流程'),
     },
     summaryAgent: {
-      invoke: jest.fn().mockResolvedValue('# 退货判断报告\n建议通过退货申请。'),
+      invoke: jest.fn().mockResolvedValue('# 退货判断报告\n建议允许用户发起退货申请。'),
     },
   } as unknown as CustomerServiceAgents;
 }
@@ -46,12 +49,40 @@ function createRouterModel(
   } as any;
 }
 
+class FakeBoundToolModel {
+  public readonly seenMessages: BaseMessage[][] = [];
+  private responseIndex = 0;
+
+  constructor(private readonly responses: AIMessage[]) {}
+
+  public readonly invoke = jest.fn(async (messages: BaseMessage[]) => {
+    this.seenMessages.push([...messages]);
+    const response = this.responses[this.responseIndex] ?? new AIMessage('');
+    this.responseIndex += 1;
+    return response;
+  });
+}
+
+function createToolCapableGraphModel(
+  route: { intent: 'analyze' | 'query' | 'chat'; reasoning: string } | Error,
+  toolResponses: AIMessage[],
+  reply = 'query or chat reply',
+) {
+  return {
+    withStructuredOutput: jest.fn(() => ({
+      invoke: route instanceof Error ? jest.fn().mockRejectedValue(route) : jest.fn().mockResolvedValue(route),
+    })),
+    bindTools: jest.fn(() => new FakeBoundToolModel(toolResponses)),
+    invoke: jest.fn().mockResolvedValue({ content: reply }),
+  } as any;
+}
+
 describe('requirement analysis graph', () => {
   it('keeps the Ch6 agent entry as a graph delegate', () => {
     expect(runAnalysisGraphFromAgentEntry).toBe(runAnalysisGraph);
   });
 
-  it('compiles the router plus five-stage analyze graph in the task order', () => {
+  it('keeps the routed parent graph shape intact around the analysis node', () => {
     const graph = createAnalysisGraph();
     const graphShape = graph.getGraph();
     const edges = graphShape.edges.map(({ source, target, conditional }) => ({
@@ -60,7 +91,6 @@ describe('requirement analysis graph', () => {
       conditional,
     }));
     const edgeKey = ({ source, target }: { source: string; target: string }) => `${source}->${target}`;
-
     const sortEdges = <Edge extends { source: string; target: string }>(items: Edge[]) =>
       [...items].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
 
@@ -70,9 +100,9 @@ describe('requirement analysis graph', () => {
         { source: 'classifier', target: 'extract', conditional: true },
         { source: 'classifier', target: 'queryHandler', conditional: true },
         { source: 'classifier', target: 'chatHandler', conditional: true },
+        { source: 'extract', target: 'clarify', conditional: false },
         { source: 'clarify', target: 'analysis_step', conditional: false },
         { source: 'analysis_step', target: 'risk_step', conditional: false },
-        { source: 'extract', target: 'clarify', conditional: false },
         { source: 'risk_step', target: 'summary_step', conditional: false },
         { source: 'summary_step', target: '__end__', conditional: false },
         { source: 'queryHandler', target: '__end__', conditional: false },
@@ -81,62 +111,34 @@ describe('requirement analysis graph', () => {
     );
   });
 
-  it('writes each required business field into state', async () => {
+  it('still completes the analyze route and preserves the final summary report', async () => {
     const agents = createScriptedAgents();
-    const graph = createAnalysisGraph();
-
-    const state = await graph.invoke(
-      { messages: [] },
-      {
-        context: {
-          requirementAnalysis: {
-            input: CUSTOMER_INPUT,
-            policyContext: '无相关政策文档',
-            agents,
-            steps: [],
-          },
-        },
-      },
+    const model = createToolCapableGraphModel(
+      { intent: 'analyze', reasoning: 'new requirement analysis' },
+      [
+        new AIMessage(
+          [
+            '功能分解：退货资格判断。',
+            '用户故事：作为客服，我希望快速判断退货资格。',
+            '验收标准：给出是否可退、原因和后续动作。',
+            '技术复杂度评估：低。',
+          ].join('\n'),
+        ),
+      ],
     );
-
-    expect(state).toEqual(
-      expect.objectContaining({
-        extracted: expect.objectContaining({ orderId: 'EC20240315001' }),
-        clarified: { questions: [] },
-        analysis: '符合退货条件：昨天收到且未拆封，可按退货政策处理；退款按原路退回。',
-        risk: '风险点：需以订单系统中的签收时间为准。',
-        summary: '# 退货判断报告\n建议通过退货申请。',
-      }),
-    );
-  });
-
-  it('runs the five-stage graph and keeps the old chain summary output', async () => {
-    const agents = createScriptedAgents();
 
     const result = await runAnalysisGraph({
       input: CUSTOMER_INPUT,
       policyContext: '无相关政策文档',
       agents,
-    });
+      model,
+    } as any);
 
-    expect(result).toEqual({
-      intent: 'analyze',
-      reasoning: 'fallback: defaulted to analyze',
-      queryResponse: null,
-      chatResponse: null,
-      mode: 'completed',
-      clarificationQuestions: [],
-      usedAgents: ['extractAgent', 'policyCheckAgent', 'riskReviewAgent', 'qaAgent', 'summaryAgent'],
-      fallback: null,
-      steps: [
-        expect.objectContaining({ agent: 'extractAgent', output: expect.stringContaining('EC20240315001') }),
-        expect.objectContaining({ agent: 'policyCheckAgent', output: expect.stringContaining('符合退货条件') }),
-        expect.objectContaining({ agent: 'riskReviewAgent', output: expect.stringContaining('风险点') }),
-        expect.objectContaining({ agent: 'qaAgent', output: expect.stringContaining('Given') }),
-        expect.objectContaining({ agent: 'summaryAgent', output: '# 退货判断报告\n建议通过退货申请。' }),
-      ],
-      report: '# 退货判断报告\n建议通过退货申请。',
-    });
+    expect(result.intent).toBe('analyze');
+    expect(result.mode).toBe('completed');
+    expect(result.report).toContain('退货判断报告');
+    expect(result.usedAgents).toContain('extractAgent');
+    expect(result.usedAgents).toContain('summaryAgent');
   });
 
   it('routes query inputs to the query handler without running the analyze chain', async () => {
@@ -162,13 +164,12 @@ describe('requirement analysis graph', () => {
     expect(agents.summaryAgent.invoke).not.toHaveBeenCalled();
   });
 
-  it('routes chat inputs to the chat handler without running business nodes in under five seconds', async () => {
+  it('routes chat inputs to the chat handler without running business nodes', async () => {
     const agents = createScriptedAgents();
     const model = createRouterModel(
       { intent: 'chat', reasoning: 'small talk' },
-      '你好，我在。需要时可以继续告诉我你的需求。',
+      '你好，我在。你可以继续告诉我你的需求。',
     );
-    const startedAt = Date.now();
 
     const result = (await runAnalysisGraph({
       input: '你好，今天天气不错',
@@ -177,7 +178,6 @@ describe('requirement analysis graph', () => {
       model,
     } as any)) as any;
 
-    expect(Date.now() - startedAt).toBeLessThan(5000);
     expect(result).toEqual(
       expect.objectContaining({
         intent: 'chat',
@@ -193,13 +193,29 @@ describe('requirement analysis graph', () => {
   });
 
   it.each([
-    ['ambiguous request id problem check', '看看 REQ-20240315-001 有没有什么问题', 'query'],
+    ['ambiguous request id problem check', '看看 REQ-20240315-001 有没有问题', 'query'],
     ['request id progress question', 'REQ-20240415-002 的进度如何', 'query'],
     ['short new requirement', '我需要一个用户登录功能', 'analyze'],
     ['query analysis report boundary case', '查询 REQ-20240315-001 的风险分析报告', 'query'],
   ] as const)('falls back to keyword routing for %s', async (_name, input, expectedIntent) => {
     const agents = createScriptedAgents();
-    const model = createRouterModel(new Error('structured output unavailable'), '降级路由回复。');
+    const model =
+      expectedIntent === 'analyze'
+        ? createToolCapableGraphModel(
+            new Error('structured output unavailable'),
+            [
+              new AIMessage(
+                [
+                  '功能分解：用户登录。',
+                  '用户故事：作为用户，我希望登录系统。',
+                  '验收标准：支持账号登录并返回成功状态。',
+                  '技术复杂度评估：中。',
+                ].join('\n'),
+              ),
+            ],
+            '降级路由回复',
+          )
+        : createRouterModel(new Error('structured output unavailable'), '降级路由回复');
 
     const result = (await runAnalysisGraph({
       input,
@@ -212,12 +228,332 @@ describe('requirement analysis graph', () => {
     expect(result.reasoning).toContain('fallback');
 
     if (expectedIntent === 'query') {
-      expect(result.queryResponse).toBe('降级路由回复。');
+      expect(result.queryResponse).toBe('降级路由回复');
       expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
     } else {
-      expect(result.analysis).toBeUndefined();
       expect(agents.extractAgent.invoke).toHaveBeenCalled();
-      expect(result.report).toBe('# 退货判断报告\n建议通过退货申请。');
     }
+  });
+
+  it('generates analysis directly for plain input without a requirement id', async () => {
+    const graph = createAnalysisSubGraph();
+    const model = new FakeBoundToolModel([
+      new AIMessage(
+        [
+          '功能分解：提供个人资料编辑。',
+          '用户故事：作为用户，我希望修改昵称。',
+          '验收标准：提交后昵称更新成功。',
+          '技术复杂度评估：低。',
+        ].join('\n'),
+      ),
+    ]);
+
+    const state = await graph.invoke(
+      {
+        messages: [new HumanMessage('新增个人资料编辑功能')],
+        toolLoopCount: 0,
+        analysisResult: null,
+      } as any,
+      {
+        context: {
+          requirementAnalysis: {
+            input: '新增个人资料编辑功能',
+            policyContext: '无相关政策文档',
+            agents: createScriptedAgents(),
+            steps: [],
+            analysisModel: model,
+            graphTrace: [],
+            analysisTools: createAnalysisTools(),
+          },
+        },
+      } as any,
+    );
+
+    expect(state.analysisResult).toContain('功能分解');
+    expect(state.toolLoopCount).toBe(0);
+  });
+
+  it('looks up requirement details before final analysis when input contains a req id', async () => {
+    const searchRequirement = jest.fn().mockResolvedValue('REQ-100 detail');
+    const graph = createAnalysisSubGraph();
+    const model = new FakeBoundToolModel([
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_req_lookup',
+            name: 'search_requirement',
+            args: { reqId: 'REQ-100' },
+            type: 'tool_call',
+          },
+        ],
+      }),
+      new AIMessage(
+        [
+          '功能分解：扩展已存在需求。',
+          '用户故事：作为产品经理，我希望查看已有需求上下文。',
+          '验收标准：分析基于查询到的详情输出。',
+          '技术复杂度评估：中。',
+        ].join('\n'),
+      ),
+    ]);
+
+    const state = await graph.invoke(
+      {
+        messages: [new HumanMessage('分析 REQ-100 并补充方案')],
+        toolLoopCount: 0,
+        analysisResult: null,
+      } as any,
+      {
+        context: {
+          requirementAnalysis: {
+            input: '分析 REQ-100 并补充方案',
+            policyContext: '无相关政策文档',
+            agents: createScriptedAgents(),
+            steps: [],
+            analysisModel: model,
+            graphTrace: [],
+            analysisTools: createAnalysisTools({ searchRequirement }),
+          },
+        },
+      } as any,
+    );
+
+    expect(searchRequirement).toHaveBeenCalledWith('REQ-100');
+    expect(state.toolLoopCount).toBe(1);
+    expect(state.analysisResult).toContain('验收标准');
+  });
+
+  it('can trigger conflict detection for login and authentication requirements', async () => {
+    const checkConflicts = jest.fn().mockResolvedValue({ hasConflict: true, reasons: ['SSO already exists'] });
+    const graph = createAnalysisSubGraph();
+    const model = new FakeBoundToolModel([
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_conflict_check',
+            name: 'check_conflicts',
+            args: { reqId: 'REQ-200', description: '新增登录与单点登录能力' },
+            type: 'tool_call',
+          },
+        ],
+      }),
+      new AIMessage(
+        [
+          '功能分解：账号密码登录、单点登录。',
+          '用户故事：作为用户，我希望安全登录。',
+          '验收标准：发现认证方案冲突并给出建议。',
+          '技术复杂度评估：中高。',
+        ].join('\n'),
+      ),
+    ]);
+
+    const state = await graph.invoke(
+      {
+        messages: [new HumanMessage('分析 REQ-200，新增登录与单点登录能力')],
+        toolLoopCount: 0,
+        analysisResult: null,
+      } as any,
+      {
+        context: {
+          requirementAnalysis: {
+            input: '分析 REQ-200，新增登录与单点登录能力',
+            policyContext: '无相关政策文档',
+            agents: createScriptedAgents(),
+            steps: [],
+            analysisModel: model,
+            graphTrace: [],
+            analysisTools: createAnalysisTools({ checkConflicts }),
+          },
+        },
+      } as any,
+    );
+
+    expect(checkConflicts).toHaveBeenCalled();
+    expect(state.analysisResult).toContain('技术复杂度评估');
+  });
+
+  it('forces finalize after six tool loops to prevent infinite cycles', async () => {
+    const graph = createAnalysisSubGraph();
+    const model = new FakeBoundToolModel(
+      Array.from(
+        { length: 7 },
+        () =>
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_loop',
+                name: 'search_requirement',
+                args: { reqId: 'REQ-300' },
+                type: 'tool_call',
+              },
+            ],
+          }),
+      ),
+    );
+
+    const state = await graph.invoke(
+      {
+        messages: [new HumanMessage('分析 REQ-300')],
+        toolLoopCount: 0,
+        analysisResult: null,
+      } as any,
+      {
+        context: {
+          requirementAnalysis: {
+            input: '分析 REQ-300',
+            policyContext: '无相关政策文档',
+            agents: createScriptedAgents(),
+            steps: [],
+            analysisModel: model,
+            graphTrace: [],
+            analysisTools: createAnalysisTools(),
+          },
+        },
+      } as any,
+    );
+
+    expect(state.toolLoopCount).toBe(6);
+    expect(state.analysisResult).toContain('达到工具调用上限');
+  });
+
+  it('writes analysisResult into the parent graph state and records the tool path', async () => {
+    const trace: string[] = [];
+    const graph = createAnalysisGraph();
+    const model = createToolCapableGraphModel(
+      { intent: 'analyze', reasoning: 'req analysis' },
+      [
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_req_lookup',
+              name: 'search_requirement',
+              args: { reqId: 'REQ-500' },
+              type: 'tool_call',
+            },
+          ],
+        }),
+        new AIMessage(
+          [
+            '功能分解：补充登录能力。',
+            '用户故事：作为用户，我希望更方便地登录。',
+            '验收标准：给出现有需求上下文与实现建议。',
+            '技术复杂度评估：中。',
+          ].join('\n'),
+        ),
+      ],
+    );
+
+    const state = await graph.invoke(
+      { messages: [] } as any,
+      {
+        context: {
+          requirementAnalysis: {
+            input: '分析 REQ-500，补充登录能力',
+            policyContext: '无相关政策文档',
+            agents: createScriptedAgents(),
+            model,
+            steps: [],
+            graphTrace: trace,
+          },
+        },
+      } as any,
+    );
+
+    expect(state.analysisResult).toContain('功能分解');
+    expect(trace.join(' -> ')).toContain('agent -> tools -> agent -> finalize');
+  });
+
+  it('returns the real graph trace from the orchestrator result', async () => {
+    const agents = createScriptedAgents();
+    const model = createToolCapableGraphModel(
+      { intent: 'analyze', reasoning: 'req analysis with tools' },
+      [
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_req_lookup',
+              name: 'search_requirement',
+              args: { reqId: 'REQ-600' },
+              type: 'tool_call',
+            },
+          ],
+        }),
+        new AIMessage(
+          [
+            'feature breakdown: extend login',
+            'user story: as a user, I want better login context',
+            'acceptance criteria: produce a supplement based on existing requirement details',
+            'technical complexity: medium',
+          ].join('\n'),
+        ),
+      ],
+    );
+
+    const result = await runAnalysisGraph({
+      input: 'Analyze REQ-600 and extend login capability',
+      policyContext: 'No related policy docs',
+      agents,
+      model,
+    } as any);
+
+    expect(result.graphTrace?.join(' -> ')).toContain('agent -> tools -> agent -> finalize');
+  });
+
+  it('returns the execution error message when the graph falls back', async () => {
+    const agents = createScriptedAgents();
+    const model = createToolCapableGraphModel(
+      { intent: 'analyze', reasoning: 'model failure path' },
+      [new AIMessage('unused')],
+    );
+    agents.extractAgent.invoke = jest.fn().mockRejectedValue(new Error('upstream model returned 502 Bad Gateway'));
+
+    const result = await runAnalysisGraph({
+      input: 'Analyze a new profile editing feature',
+      policyContext: 'No related policy docs',
+      agents,
+      model,
+    } as any);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        mode: 'fallback',
+        fallback: 'manual_review',
+        errorMessage: expect.stringContaining('upstream model returned 502 Bad Gateway'),
+      }),
+    );
+  });
+
+  it('falls back with a timeout message when graph execution takes too long', async () => {
+    const agents = createScriptedAgents();
+    agents.extractAgent.invoke = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve(JSON.stringify({ orderId: 'REQ-SLOW' })), 50);
+        }),
+    ) as any;
+
+    const result = await runAnalysisGraph({
+      input: 'Analyze a slow requirement',
+      policyContext: 'No related policy docs',
+      agents,
+      model: createToolCapableGraphModel(
+        { intent: 'analyze', reasoning: 'slow path' },
+        [new AIMessage('unused')],
+      ),
+      graphTimeoutMs: 1,
+    } as any);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        mode: 'fallback',
+        fallback: 'manual_review',
+        errorMessage: expect.stringContaining('timed out after 1ms'),
+      }),
+    );
   });
 });

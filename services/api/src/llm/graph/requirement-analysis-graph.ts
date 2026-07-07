@@ -3,9 +3,12 @@ import { Annotation, END, MessagesAnnotation, START, StateGraph, type Runtime } 
 import { z } from 'zod';
 import type { CustomerServiceAgentName, CustomerServiceAgents } from '../agents/sub-agents';
 import type { ChatModelLike } from '../model.factory';
+import { createAnalysisSubGraph, type ToolBoundModelLike } from './analysis-subgraph';
+import { createAnalysisTools, type AnalysisTools } from './analysis-tools';
 
 const REQUIRED_EXTRACTION_FIELDS = ['orderId', 'requestType', 'receivedDate', 'isUnopened'] as const;
 const INTENTS = ['analyze', 'query', 'chat'] as const;
+const DEFAULT_GRAPH_TIMEOUT_MS = 30_000;
 const GRAPH_NODE = {
   classifier: 'classifier',
   extract: 'extract',
@@ -21,6 +24,8 @@ const intentSchema = z.object({
   intent: z.enum(INTENTS),
   reasoning: z.string(),
 });
+
+const analysisSubGraph = createAnalysisSubGraph();
 
 export type RequirementIntent = (typeof INTENTS)[number];
 export type RequirementAnalysisStepName = CustomerServiceAgentName | 'classifier' | 'queryHandler' | 'chatHandler';
@@ -44,7 +49,9 @@ export interface OrchestratorResult {
   usedAgents: RequirementAnalysisStepName[];
   fallback: 'manual_review' | null;
   steps: AgentStep[];
+  graphTrace: string[];
   report: string;
+  errorMessage?: string | null;
   intent?: RequirementIntent;
   reasoning?: string | null;
   queryResponse?: string | null;
@@ -59,6 +66,8 @@ export interface OrchestratorInput {
 export interface RequirementAnalysisGraphInput extends OrchestratorInput {
   agents: CustomerServiceAgents;
   model?: ChatModelLike;
+  graphTrace?: string[];
+  graphTimeoutMs?: number;
 }
 
 export interface RequirementClarification {
@@ -70,7 +79,14 @@ interface RequirementAnalysisRuntime {
   policyContext: string;
   agents: CustomerServiceAgents;
   model?: ChatModelLike;
+  analysisModel?: ToolBoundModelLike;
+  analysisTools?: AnalysisTools;
+  graphTrace: string[];
   steps: AgentStep[];
+}
+
+interface ToolBindableModelLike extends ChatModelLike {
+  bindTools(tools: AnalysisTools): ToolBoundModelLike;
 }
 
 export const RequirementAnalysisState = Annotation.Root({
@@ -83,6 +99,14 @@ export const RequirementAnalysisState = Annotation.Root({
   extracted: Annotation<CustomerServiceExtraction | null>(),
   clarified: Annotation<RequirementClarification | null>(),
   analysis: Annotation<string | null>(),
+  analysisResult: Annotation<string | null>({
+    value: (_current, update) => update,
+    default: () => null,
+  }),
+  toolLoopCount: Annotation<number>({
+    value: (_current, update) => update,
+    default: () => 0,
+  }),
   risk: Annotation<string | null>(),
   summary: Annotation<string | null>(),
   queryResponse: Annotation<string | null>(),
@@ -128,19 +152,24 @@ export async function runAnalysisGraph(input: RequirementAnalysisGraphInput): Pr
 
   try {
     const graph = createAnalysisGraph();
-    const state = await graph.invoke(
-      { messages: [] },
-      { context: { requirementAnalysis: runtime } },
+    const state = await withTimeout(
+      graph.invoke(
+        { messages: [], toolLoopCount: 0, analysisResult: null },
+        { context: { requirementAnalysis: runtime } },
+      ),
+      input.graphTimeoutMs ?? DEFAULT_GRAPH_TIMEOUT_MS,
     );
 
-    return buildResult(state, runtime.steps);
-  } catch {
+    return buildResult(state, runtime.steps, runtime.graphTrace);
+  } catch (error) {
     return {
       mode: 'fallback',
       clarificationQuestions: [],
       usedAgents: runtime.steps.map((step) => step.agent),
       fallback: 'manual_review',
       steps: runtime.steps,
+      graphTrace: runtime.graphTrace,
+      errorMessage: errorToMessage(error),
       report: '',
     };
   }
@@ -176,12 +205,10 @@ async function classifierNode(
       };
     }
   } catch {
-    // Classification must never block the graph; deterministic routing keeps the request moving.
+    // Classification should not block the graph.
   }
 
-  const fallback = classifyIntentByRules(runtime.input);
-
-  return fallback;
+  return classifyIntentByRules(runtime.input);
 }
 
 function clarifyNode(state: RequirementAnalysisStateValue): RequirementAnalysisStateUpdate {
@@ -199,16 +226,36 @@ async function analysisNode(
   const runtime = getRuntime(runtimeConfig);
 
   if (hasClarificationQuestions(state)) {
-    return { analysis: null };
+    return { analysis: null, analysisResult: null, toolLoopCount: 0 };
   }
 
-  const extraction = ensureExtraction(state.extracted);
-  const policyCheck = await runtime.agents.policyCheckAgent.invoke({
-    extraction: JSON.stringify(extraction),
-    policyContext: runtime.policyContext,
-  });
+  runtime.analysisTools = runtime.analysisTools ?? createAnalysisTools();
+  runtime.analysisModel = runtime.analysisModel ?? buildAnalysisModel(runtime.model, runtime.analysisTools);
 
-  return { analysis: policyCheck };
+  if (!runtime.analysisModel) {
+    throw new Error('Chat model with bindTools support is required for the analysis subgraph');
+  }
+
+  const subgraphRuntime = runtime as RequirementAnalysisRuntime & {
+    analysisModel: ToolBoundModelLike;
+    analysisTools: AnalysisTools;
+  };
+
+  const subgraphState = await analysisSubGraph.invoke(
+    {
+      messages: state.messages.length > 0 ? state.messages : [new HumanMessage(runtime.input)],
+      toolLoopCount: state.toolLoopCount,
+      analysisResult: state.analysisResult,
+    },
+    { context: { requirementAnalysis: subgraphRuntime } },
+  );
+
+  return {
+    messages: subgraphState.messages,
+    toolLoopCount: subgraphState.toolLoopCount,
+    analysisResult: subgraphState.analysisResult,
+    analysis: subgraphState.analysisResult,
+  };
 }
 
 async function riskNode(
@@ -222,19 +269,22 @@ async function riskNode(
   }
 
   const extraction = ensureExtraction(state.extracted);
-  const policyCheck = ensureText(state.analysis, 'policyCheckAgent output is required before risk review');
+  const analysisText = ensureText(
+    state.analysisResult ?? state.analysis,
+    'analysis subgraph output is required before risk review',
+  );
   const riskReview = await runtime.agents.riskReviewAgent.invoke({
     input: runtime.input,
     extraction: JSON.stringify(extraction),
     policyContext: runtime.policyContext,
   });
 
-  runtime.steps.push(
-    { agent: 'policyCheckAgent', output: policyCheck },
-    { agent: 'riskReviewAgent', output: riskReview },
-  );
+  runtime.steps.push({ agent: 'riskReviewAgent', output: riskReview });
 
-  return { risk: riskReview };
+  return {
+    analysis: analysisText,
+    risk: riskReview,
+  };
 }
 
 async function summaryNode(
@@ -249,12 +299,15 @@ async function summaryNode(
 
   const extraction = ensureExtraction(state.extracted);
   const extractionText = JSON.stringify(extraction);
-  const policyCheck = ensureText(state.analysis, 'policyCheckAgent output is required before summary');
+  const analysisText = ensureText(
+    state.analysisResult ?? state.analysis,
+    'analysis subgraph output is required before summary',
+  );
   const riskReview = ensureText(state.risk, 'riskReviewAgent output is required before summary');
   const qa = await runtime.agents.qaAgent.invoke({
     extraction: extractionText,
     policyContext: runtime.policyContext,
-    policyCheck,
+    policyCheck: analysisText,
     riskReview,
   });
   runtime.steps.push({ agent: 'qaAgent', output: qa });
@@ -263,7 +316,7 @@ async function summaryNode(
     input: runtime.input,
     extraction: extractionText,
     policyContext: runtime.policyContext,
-    policyCheck,
+    policyCheck: analysisText,
     riskReview,
     qa,
   });
@@ -296,7 +349,7 @@ async function chatHandlerNode(
 ): Promise<RequirementAnalysisStateUpdate> {
   const runtime = getRuntime(runtimeConfig);
   const response = await invokeResponseModel(runtime.model, [
-    new SystemMessage('你是友好的AI助手。请自然、简洁地回应用户闲聊。'),
+    new SystemMessage('你是友好的 AI 助手。请自然、简洁地回应用户闲聊。'),
     new HumanMessage(runtime.input),
   ]);
 
@@ -309,22 +362,32 @@ async function chatHandlerNode(
 }
 
 function normalizeGraphInput(input: RequirementAnalysisGraphInput): RequirementAnalysisRuntime {
+  const analysisTools = createAnalysisTools();
+
   return {
     input: input.input,
     policyContext: input.policyContext?.trim() || '无相关政策文档',
     agents: input.agents,
     model: input.model,
+    analysisTools,
+    analysisModel: buildAnalysisModel(input.model, analysisTools),
+    graphTrace: input.graphTrace ?? [],
     steps: [],
   };
 }
 
-function buildResult(state: RequirementAnalysisStateValue, steps: AgentStep[]): OrchestratorResult {
+function buildResult(
+  state: RequirementAnalysisStateValue,
+  steps: AgentStep[],
+  graphTrace: string[],
+): OrchestratorResult {
   const clarificationQuestions = state.clarified?.questions ?? [];
   const base = {
     intent: state.intent,
     reasoning: state.reasoning ?? null,
     queryResponse: state.queryResponse ?? null,
     chatResponse: state.chatResponse ?? null,
+    graphTrace,
   };
 
   if (clarificationQuestions.length > 0) {
@@ -346,7 +409,7 @@ function buildResult(state: RequirementAnalysisStateValue, steps: AgentStep[]): 
     usedAgents: steps.map((step) => step.agent),
     fallback: null,
     steps,
-    report: state.summary ?? '',
+    report: state.summary ?? state.analysisResult ?? '',
   };
 }
 
@@ -366,12 +429,12 @@ function buildClassifierMessages(input: string): BaseMessage[] {
   return [
     new SystemMessage(
       [
-        '你是需求请求意图分类器。请只判断用户当前请求属于 analyze、query、chat 三类之一。',
-        'analyze：用户提出新需求、描述功能、请求评估、要求分析可行性或风险。例如：分析需求 REQ-20240315-001：开发在线问卷系统。',
-        'query：用户查询已有需求、需求编号、状态、进度、报告、历史分析结果。例如：查询 REQ-20240315-001 的当前状态。',
-        'chat：用户只是问候、寒暄、闲聊，未提出需求分析或查询。例如：你好，今天天气不错。',
-        '边界情况：像“查询 REQ-20240315-001 的风险分析报告”应判为 query，因为用户是在查已有报告。',
-        '优先级：有明确查询词和需求编号时优先 query；纯闲聊优先 chat；默认 analyze。',
+        '你是需求请求意图分类器。请只判断当前请求属于 analyze、query、chat 之一。',
+        'analyze：用户提出新需求、描述功能、请求评估、分析可行性或风险。',
+        'query：用户查询已有需求、需求编号、状态、进度、报告或历史分析结果。',
+        'chat：用户只是问候、寒暄或闲聊，没有提出分析或查询诉求。',
+        '边界情况：例如“查询 REQ-20240315-001 的风险分析报告”应判定为 query。',
+        '优先级：需求编号 + 查询词 优先判定为 query；纯闲聊优先判定为 chat；其余默认 analyze。',
         '输出必须包含 intent 和 reasoning。',
       ].join('\n'),
     ),
@@ -392,15 +455,15 @@ function classifyIntentByRules(input: string): { intent: RequirementIntent; reas
 }
 
 function isQueryIntent(input: string) {
-  return hasRequirementId(input) && /(查询|查看|看看|状态|进度|报告|结果|当前|如何|有没有)/i.test(input);
+  return hasRequirementId(input) && /(查询|查看|看看|状态|进度|报告|结果|当前|如何|有没有|query|status|progress|report)/i.test(input);
 }
 
 function isChatIntent(input: string) {
-  return /^(你好|您好|嗨|hi|hello|hey|早上好|晚上好)[，,！!\s]*(今天天气不错|在吗|谢谢|辛苦了)?[。.!！\s]*$/i.test(input.trim());
+  return /^(你好|您好|hi|hello|hey)([，,\s!。？?].*)?$/i.test(input.trim());
 }
 
 function hasRequirementId(input: string) {
-  return /\bREQ-\d{8}-\d{3,}\b/i.test(input);
+  return /\bREQ-[A-Z0-9-]+\b/i.test(input);
 }
 
 async function invokeResponseModel(model: ChatModelLike | undefined, messages: BaseMessage[]) {
@@ -421,6 +484,14 @@ function getRuntime(runtimeConfig: RequirementAnalysisNodeRuntime): RequirementA
   }
 
   return runtime;
+}
+
+function buildAnalysisModel(model: ChatModelLike | undefined, analysisTools: AnalysisTools) {
+  if (!model || typeof (model as Partial<ToolBindableModelLike>).bindTools !== 'function') {
+    return undefined;
+  }
+
+  return (model as ToolBindableModelLike).bindTools(analysisTools);
 }
 
 function parseExtraction(output: string): CustomerServiceExtraction {
@@ -444,15 +515,15 @@ function completeExtraction(extraction: CustomerServiceExtraction, input: string
 }
 
 function inferRequestType(input: string) {
-  if (/(退货|退掉|退回|能不能退|可以退)/.test(input)) {
+  if (/(退货|退回|return)/i.test(input)) {
     return 'return';
   }
 
-  if (/(退款|退钱)/.test(input)) {
+  if (/(退款|refund)/i.test(input)) {
     return 'refund';
   }
 
-  if (/(换货|更换|换一个)/.test(input)) {
+  if (/(换货|更换|exchange)/i.test(input)) {
     return 'exchange';
   }
 
@@ -460,8 +531,8 @@ function inferRequestType(input: string) {
 }
 
 function inferReceivedDate(input: string) {
-  const relativeBeforeVerb = input.match(/(今天|昨天|前天|刚刚|刚|当天).{0,12}(收到|签收|收货)/);
-  const verbBeforeRelative = input.match(/(收到|签收|收货).{0,12}(今天|昨天|前天|刚刚|刚|当天)/);
+  const relativeBeforeVerb = input.match(/(今天|昨天|前天|刚刚|当天).{0,12}(收到|签收|收货)/);
+  const verbBeforeRelative = input.match(/(收到|签收|收货).{0,12}(今天|昨天|前天|刚刚|当天)/);
   const absoluteDate = input.match(/(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|\d{1,2}月\d{1,2}日)/);
 
   return relativeBeforeVerb?.[1] ?? verbBeforeRelative?.[2] ?? absoluteDate?.[1] ?? null;
@@ -536,7 +607,51 @@ function messageContentToText(content: unknown) {
     return content;
   }
 
-  return JSON.stringify(content);
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+
+        if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') {
+          return item.text;
+        }
+
+        return '';
+      })
+      .join('');
+  }
+
+  if (content && typeof content === 'object' && 'text' in content && typeof (content as { text?: unknown }).text === 'string') {
+    return (content as { text: string }).text;
+  }
+
+  return String(content ?? '');
+}
+
+function errorToMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error ?? 'Unknown requirement analysis error');
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`Requirement analysis graph timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

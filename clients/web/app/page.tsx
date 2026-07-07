@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { RequirementResult } from "@repo/contracts";
 import { useState } from "react";
 import { AIChatContainer } from "../src/components/ai-ui/AIChatContainer";
@@ -42,8 +43,17 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-8 text-zinc-950 sm:px-10">
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <header>
-          <h1 className="text-2xl font-semibold sm:text-3xl">需求分析工作台</h1>
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.28em] text-zinc-500">AI Requirement Lab</p>
+            <h1 className="text-2xl font-semibold sm:text-3xl">需求分析工作台</h1>
+          </div>
+          <Link
+            className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+            href="/analysis-graph"
+          >
+            打开分析子图测试页
+          </Link>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
