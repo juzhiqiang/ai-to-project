@@ -37,8 +37,14 @@ function createScriptedAgents(): CustomerServiceAgents {
   } as unknown as CustomerServiceAgents;
 }
 
+type TriageRoute = {
+  action: 'answer' | 'handoff_to_analysis' | 'handoff_to_risk';
+  response?: string | null;
+  reason?: string | null;
+};
+
 function createRouterModel(
-  route: { intent: 'analyze' | 'query' | 'chat'; reasoning: string } | Error,
+  route: TriageRoute | Error,
   reply: string,
 ) {
   return {
@@ -64,7 +70,7 @@ class FakeBoundToolModel {
 }
 
 function createToolCapableGraphModel(
-  route: { intent: 'analyze' | 'query' | 'chat'; reasoning: string } | Error,
+  route: TriageRoute | Error,
   toolResponses: AIMessage[],
   reply = 'query or chat reply',
   supervisorRoute = { activeExperts: ['functional'], reasoning: 'default functional expert' },
@@ -85,7 +91,10 @@ function createToolCapableGraphModel(
           return route;
         }
 
-        if (currentIndex === 1) {
+        if (
+          currentIndex === 1 &&
+          (route instanceof Error || route.action === 'handoff_to_analysis')
+        ) {
           return supervisorRoute;
         }
 
@@ -116,12 +125,14 @@ describe('requirement analysis graph', () => {
 
     expect(sortEdges(edges)).toEqual(
       sortEdges([
-        { source: '__start__', target: 'classifier', conditional: false },
-        { source: 'classifier', target: 'extract', conditional: true },
-        { source: 'classifier', target: 'queryHandler', conditional: true },
-        { source: 'classifier', target: 'chatHandler', conditional: true },
+        { source: '__start__', target: 'triage', conditional: false },
+        { source: 'triage', target: 'extract', conditional: true },
+        { source: 'triage', target: 'queryHandler', conditional: true },
+        { source: 'triage', target: 'chatHandler', conditional: true },
+        { source: 'triage', target: '__end__', conditional: true },
         { source: 'extract', target: 'clarify', conditional: false },
-        { source: 'clarify', target: 'analysis_step', conditional: false },
+        { source: 'clarify', target: 'analysis_step', conditional: true },
+        { source: 'clarify', target: 'risk_step', conditional: true },
         { source: 'analysis_step', target: 'risk_step', conditional: false },
         { source: 'risk_step', target: 'summary_step', conditional: false },
         { source: 'summary_step', target: '__end__', conditional: false },
@@ -134,7 +145,7 @@ describe('requirement analysis graph', () => {
   it('still completes the analyze route and preserves the final summary report', async () => {
     const agents = createScriptedAgents();
     const model = createToolCapableGraphModel(
-      { intent: 'analyze', reasoning: 'new requirement analysis' },
+      { action: 'handoff_to_analysis', reason: 'new requirement analysis' },
       [
         new AIMessage(
           [
@@ -156,6 +167,7 @@ describe('requirement analysis graph', () => {
     } as any);
 
     expect(result.intent).toBe('analyze');
+    expect(result.handoffReason).toBe('new requirement analysis');
     expect(result.mode).toBe('completed');
     expect(result.report.length).toBeGreaterThan(0);
     expect(result.usedAgents).toContain('extractAgent');
@@ -164,11 +176,15 @@ describe('requirement analysis graph', () => {
     expect(result.critiqueIssues).toEqual([]);
   });
 
-  it('routes query inputs to the query handler without running the analyze chain', async () => {
+  it('answers directly from triage without running business nodes', async () => {
     const agents = createScriptedAgents();
     const model = createRouterModel(
-      { intent: 'query', reasoning: 'contains a request id and a status question' },
-      '查询结果：REQ-20240315-001 当前状态为处理中。',
+      {
+        action: 'answer',
+        response: '查询结果：REQ-20240315-001 当前状态为处理中。',
+        reason: 'triage can answer this request directly',
+      },
+      'unused reply',
     );
 
     const result = (await runAnalysisGraph({
@@ -178,24 +194,27 @@ describe('requirement analysis graph', () => {
       model,
     } as any)) as any;
 
-    expect(result.intent).toBe('query');
-    expect(result.queryResponse).toContain('处理中');
+    expect(result.intent).toBe('chat');
+    expect(result.chatResponse).toContain('处理中');
+    expect(result.report).toContain('处理中');
+    expect(result.handoffReason).toBe('triage can answer this request directly');
     expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
     expect(agents.policyCheckAgent.invoke).not.toHaveBeenCalled();
     expect(agents.riskReviewAgent.invoke).not.toHaveBeenCalled();
     expect(agents.qaAgent.invoke).not.toHaveBeenCalled();
     expect(agents.summaryAgent.invoke).not.toHaveBeenCalled();
+    expect(model.invoke).not.toHaveBeenCalled();
   });
 
-  it('routes chat inputs to the chat handler without running business nodes', async () => {
+  it('hands off risk-only inputs directly to the risk and summary chain', async () => {
     const agents = createScriptedAgents();
-    const model = createRouterModel(
-      { intent: 'chat', reasoning: 'small talk' },
-      '你好，我在。你可以继续告诉我你的需求。',
+    const model = createToolCapableGraphModel(
+      { action: 'handoff_to_risk', reason: 'policy risk review is the primary work' },
+      [new AIMessage('analysis should not run')],
     );
 
     const result = (await runAnalysisGraph({
-      input: '你好，今天天气不错',
+      input: CUSTOMER_INPUT,
       policyContext: '无相关政策文档',
       agents,
       model,
@@ -203,16 +222,19 @@ describe('requirement analysis graph', () => {
 
     expect(result).toEqual(
       expect.objectContaining({
-        intent: 'chat',
-        chatResponse: expect.stringContaining('你好'),
-        report: expect.stringContaining('你好'),
+        intent: 'risk_only',
+        handoffReason: 'policy risk review is the primary work',
+        mode: 'completed',
       }),
     );
-    expect(agents.extractAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.extractAgent.invoke).toHaveBeenCalled();
     expect(agents.policyCheckAgent.invoke).not.toHaveBeenCalled();
-    expect(agents.riskReviewAgent.invoke).not.toHaveBeenCalled();
-    expect(agents.qaAgent.invoke).not.toHaveBeenCalled();
+    expect(agents.riskReviewAgent.invoke).toHaveBeenCalled();
+    expect(agents.qaAgent.invoke).toHaveBeenCalled();
     expect(agents.summaryAgent.invoke).not.toHaveBeenCalled();
+    expect(result.report).toBe('query or chat reply');
+    expect(result.graphTrace).toEqual(expect.arrayContaining(['summary.actor', 'summary.critic']));
+    expect(model.bindTools).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -446,7 +468,7 @@ describe('requirement analysis graph', () => {
     const trace: string[] = [];
     const graph = createAnalysisGraph();
     const model = createToolCapableGraphModel(
-      { intent: 'analyze', reasoning: 'req analysis' },
+      { action: 'handoff_to_analysis', reason: 'req analysis' },
       [
         new AIMessage({
           content: '',
@@ -497,7 +519,7 @@ describe('requirement analysis graph', () => {
   it('returns the real graph trace from the orchestrator result', async () => {
     const agents = createScriptedAgents();
     const model = createToolCapableGraphModel(
-      { intent: 'analyze', reasoning: 'req analysis with tools' },
+      { action: 'handoff_to_analysis', reason: 'req analysis with tools' },
       [
         new AIMessage({
           content: '',
@@ -536,7 +558,7 @@ describe('requirement analysis graph', () => {
   it('returns the execution error message when the graph falls back', async () => {
     const agents = createScriptedAgents();
     const model = createToolCapableGraphModel(
-      { intent: 'analyze', reasoning: 'model failure path' },
+      { action: 'handoff_to_analysis', reason: 'model failure path' },
       [new AIMessage('unused')],
     );
     agents.extractAgent.invoke = jest.fn().mockRejectedValue(new Error('upstream model returned 502 Bad Gateway'));
@@ -583,7 +605,7 @@ describe('requirement analysis graph', () => {
       policyContext: '无相关政策文档',
       agents,
       model: createToolCapableGraphModel(
-        { intent: 'analyze', reasoning: 'timeout disabled path' },
+        { action: 'handoff_to_analysis', reason: 'timeout disabled path' },
         [
           new AIMessage(
             [
@@ -616,7 +638,7 @@ describe('requirement analysis graph', () => {
       policyContext: 'No related policy docs',
       agents,
       model: createToolCapableGraphModel(
-        { intent: 'analyze', reasoning: 'slow path' },
+        { action: 'handoff_to_analysis', reason: 'slow path' },
         [new AIMessage('unused')],
       ),
       graphTimeoutMs: 1,

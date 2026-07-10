@@ -13,4 +13,9 @@ export class AgentsController {
   orchestrate(@Body() body: OrchestrateDto) {
     return this.orchestratorService.orchestrate(body.input);
   }
+
+  @Post('plan-execute')
+  planAndExecute(@Body() body: OrchestrateDto) {
+    return this.orchestratorService.planAndExecute(body.input);
+  }
 }

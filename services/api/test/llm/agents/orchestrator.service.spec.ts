@@ -83,7 +83,7 @@ function createAnalyzeServiceFactory(options: ServiceModelOptions) {
       structuredInvokeIndex += 1;
 
       if (currentIndex === 0) {
-        return { intent: 'analyze', reasoning: 'service analyze flow' };
+        return { action: 'handoff_to_analysis', reason: 'service analyze flow' };
       }
 
       return { pass: true, critique: '', issues: [] };
@@ -146,6 +146,7 @@ describe('OrchestratorService', () => {
     expect(result).toEqual(expect.objectContaining({
       intent: 'analyze',
       reasoning: 'service analyze flow',
+      handoffReason: 'service analyze flow',
       queryResponse: null,
       chatResponse: null,
       mode: 'completed',

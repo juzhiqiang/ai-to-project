@@ -6,6 +6,10 @@ import {
   type OrchestratorResult,
 } from '../graph/requirement-analysis-graph';
 import {
+  runPlanExecutePipeline,
+  type PlanExecutePipelineResult,
+} from '../graph/plan-execute-pipeline';
+import {
   buildCustomerServiceAgents,
   type CustomerServiceAgents,
   type CustomerServiceAgentModel,
@@ -17,6 +21,7 @@ export type {
   OrchestratorInput,
   OrchestratorResult,
 } from '../graph/requirement-analysis-graph';
+export type { PlanExecutePipelineResult } from '../graph/plan-execute-pipeline';
 
 @Injectable()
 export class OrchestratorService {
@@ -34,6 +39,19 @@ export class OrchestratorService {
       policyContext,
       agents: this.buildAgents(model),
       model,
+    });
+  }
+
+  async planAndExecute(request: string | OrchestratorInput): Promise<PlanExecutePipelineResult> {
+    const { input, policyContext } = normalizeOrchestratorInput(request);
+    const model = this.createChatModel();
+
+    return runPlanExecutePipeline({
+      input,
+      policyContext,
+      agents: this.buildAgents(model),
+      model,
+      parentThreadId: `pipeline-${Date.now()}`,
     });
   }
 

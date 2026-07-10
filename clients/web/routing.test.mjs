@@ -4,7 +4,10 @@ import test from "node:test";
 
 const pageSource = readFileSync(new URL("./app/page.tsx", import.meta.url), "utf8");
 const analysisGraphPagePath = new URL("./app/analysis-graph/page.tsx", import.meta.url);
+const triagePagePath = new URL("./app/triage/page.tsx", import.meta.url);
+const planExecutePagePath = new URL("./app/plan-execute/page.tsx", import.meta.url);
 const agentsOrchestrateRoutePath = new URL("./app/api/agents/orchestrate/route.ts", import.meta.url);
+const agentsPlanExecuteRoutePath = new URL("./app/api/agents/plan-execute/route.ts", import.meta.url);
 const criticRefinePageSource = readFileSync(new URL("./app/critic-refine/page.tsx", import.meta.url), "utf8");
 const nextConfigSource = readFileSync(new URL("./next.config.ts", import.meta.url), "utf8");
 
@@ -16,6 +19,16 @@ test("requirement page calls the backend route path directly", () => {
 test("home page links to the supervisor playground", () => {
   assert.match(pageSource, /href="\/analysis-graph"/);
   assert.match(pageSource, /Supervisor 多专家测试/);
+});
+
+test("home page links to the triage handoff playground", () => {
+  assert.match(pageSource, /href="\/triage"/);
+  assert.match(pageSource, /Triage Handoff/);
+});
+
+test("home page links to the plan execute pipeline playground", () => {
+  assert.match(pageSource, /href="\/plan-execute"/);
+  assert.match(pageSource, /Plan Execute/);
 });
 
 test("critic refine route reuses the graph playground implementation", () => {
@@ -46,6 +59,17 @@ test("web owns an explicit orchestrator proxy route with readable backend errors
   assert.match(routeSource, /API_ORIGIN/);
   assert.match(routeSource, /http:\/\/127\.0\.0\.1:3001/);
   assert.match(routeSource, /Backend orchestrator request failed/);
+  assert.match(routeSource, /status:\s*502/);
+});
+
+test("web owns an explicit plan execute proxy route with readable backend errors", () => {
+  assert.equal(existsSync(agentsPlanExecuteRoutePath), true);
+
+  const routeSource = readFileSync(agentsPlanExecuteRoutePath, "utf8");
+
+  assert.match(routeSource, /API_ORIGIN/);
+  assert.match(routeSource, /\/api\/agents\/plan-execute/);
+  assert.match(routeSource, /Backend plan execute request failed/);
   assert.match(routeSource, /status:\s*502/);
 });
 
@@ -102,4 +126,27 @@ test("analysis graph page can schedule the multi-agent test script cases", () =>
   assert.match(analysisPageSource, /runMultiAgentCases/);
   assert.match(analysisPageSource, /expectedExperts/);
   assert.match(analysisPageSource, /elapsedMs/);
+});
+
+test("triage page calls the orchestrator API route and renders handoff fields", () => {
+  assert.equal(existsSync(triagePagePath), true);
+
+  const triagePageSource = readFileSync(triagePagePath, "utf8");
+
+  assert.match(triagePageSource, /fetch\("\/api\/agents\/orchestrate"/);
+  assert.match(triagePageSource, /handoffReason/);
+  assert.match(triagePageSource, /risk_only/);
+  assert.match(triagePageSource, /Triage Handoff/);
+});
+
+test("plan execute page calls the pipeline API route and renders reflexion fields", () => {
+  assert.equal(existsSync(planExecutePagePath), true);
+
+  const planExecutePageSource = readFileSync(planExecutePagePath, "utf8");
+
+  assert.match(planExecutePageSource, /fetch\("\/api\/agents\/plan-execute"/);
+  assert.match(planExecutePageSource, /Plan Execute/);
+  assert.match(planExecutePageSource, /reflections/);
+  assert.match(planExecutePageSource, /retryCount/);
+  assert.match(planExecutePageSource, /stepResults/);
 });

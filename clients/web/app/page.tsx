@@ -48,12 +48,26 @@ export default function Home() {
             <p className="text-sm font-medium uppercase tracking-[0.28em] text-zinc-500">AI Requirement Lab</p>
             <h1 className="text-2xl font-semibold sm:text-3xl">需求分析工作台</h1>
           </div>
-          <Link
-            className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-            href="/analysis-graph"
-          >
-            Supervisor 多专家测试
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/plan-execute"
+            >
+              Plan Execute
+            </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/triage"
+            >
+              Triage Handoff
+            </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/analysis-graph"
+            >
+              Supervisor 多专家测试
+            </Link>
+          </div>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">

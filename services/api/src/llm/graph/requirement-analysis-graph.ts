@@ -1,4 +1,5 @@
 import {
+  AIMessage,
   HumanMessage,
   SystemMessage,
   type BaseMessage,
@@ -35,9 +36,14 @@ const REQUIRED_EXTRACTION_FIELDS = [
   "receivedDate",
   "isUnopened",
 ] as const;
-const INTENTS = ["analyze", "query", "chat"] as const;
+const INTENTS = ["analyze", "query", "chat", "risk_only"] as const;
+const TRIAGE_ACTIONS = [
+  "answer",
+  "handoff_to_analysis",
+  "handoff_to_risk",
+] as const;
 const GRAPH_NODE = {
-  classifier: "classifier",
+  triage: "triage",
   extract: "extract",
   clarify: "clarify",
   analysis: "analysis_step",
@@ -47,16 +53,19 @@ const GRAPH_NODE = {
   chatHandler: "chatHandler",
 } as const;
 
-const intentSchema = z.object({
-  intent: z.enum(INTENTS),
-  reasoning: z.string(),
+export const triageSchema = z.object({
+  action: z.enum(TRIAGE_ACTIONS),
+  response: z.string().nullish(),
+  reason: z.string().nullish(),
 });
 
 const summarySubGraph = createSummarySubGraph();
 
 export type RequirementIntent = (typeof INTENTS)[number];
+export type RequirementTriageAction = (typeof TRIAGE_ACTIONS)[number];
 export type RequirementAnalysisStepName =
   | CustomerServiceAgentName
+  | "triage"
   | "classifier"
   | "queryHandler"
   | "chatHandler";
@@ -85,6 +94,7 @@ export interface OrchestratorResult {
   errorMessage?: string | null;
   intent?: RequirementIntent;
   reasoning?: string | null;
+  handoffReason?: string | null;
   queryResponse?: string | null;
   chatResponse?: string | null;
   critique?: string | null;
@@ -128,10 +138,6 @@ interface RequirementAnalysisRuntime {
   steps: AgentStep[];
 }
 
-interface ToolBindableModelLike extends ChatModelLike {
-  bindTools(tools: AnalysisTools): ToolBoundModelLike;
-}
-
 export const RequirementAnalysisState = Annotation.Root({
   ...MessagesAnnotation.spec,
   intent: Annotation<RequirementIntent>({
@@ -139,6 +145,10 @@ export const RequirementAnalysisState = Annotation.Root({
     default: () => "analyze",
   }),
   reasoning: Annotation<string | null>(),
+  handoffReason: Annotation<string>({
+    value: (_current, update) => update,
+    default: () => "",
+  }),
   extracted: Annotation<CustomerServiceExtraction | null>(),
   clarified: Annotation<RequirementClarification | null>(),
   analysis: Annotation<string | null>(),
@@ -191,7 +201,7 @@ type RequirementAnalysisNodeRuntime = Runtime<
 
 export function createAnalysisGraph() {
   return new StateGraph(RequirementAnalysisState, RequirementAnalysisContext)
-    .addNode(GRAPH_NODE.classifier, classifierNode)
+    .addNode(GRAPH_NODE.triage, triageNode)
     .addNode(GRAPH_NODE.extract, extractNode)
     .addNode(GRAPH_NODE.clarify, clarifyNode)
     .addNode(GRAPH_NODE.analysis, analysisNode)
@@ -199,14 +209,18 @@ export function createAnalysisGraph() {
     .addNode(GRAPH_NODE.summary, summaryNode)
     .addNode(GRAPH_NODE.queryHandler, queryHandlerNode)
     .addNode(GRAPH_NODE.chatHandler, chatHandlerNode)
-    .addEdge(START, GRAPH_NODE.classifier)
-    .addConditionalEdges(GRAPH_NODE.classifier, routeByIntent, [
+    .addEdge(START, GRAPH_NODE.triage)
+    .addConditionalEdges(GRAPH_NODE.triage, routeByIntent, [
       GRAPH_NODE.extract,
       GRAPH_NODE.queryHandler,
       GRAPH_NODE.chatHandler,
+      END,
     ])
     .addEdge(GRAPH_NODE.extract, GRAPH_NODE.clarify)
-    .addEdge(GRAPH_NODE.clarify, GRAPH_NODE.analysis)
+    .addConditionalEdges(GRAPH_NODE.clarify, routeAfterClarify, [
+      GRAPH_NODE.analysis,
+      GRAPH_NODE.risk,
+    ])
     .addEdge(GRAPH_NODE.analysis, GRAPH_NODE.risk)
     .addEdge(GRAPH_NODE.risk, GRAPH_NODE.summary)
     .addEdge(GRAPH_NODE.summary, END)
@@ -266,7 +280,7 @@ async function extractNode(
   return { extracted: extraction };
 }
 
-async function classifierNode(
+async function triageNode(
   _state: RequirementAnalysisStateValue,
   runtimeConfig: RequirementAnalysisNodeRuntime,
 ): Promise<RequirementAnalysisStateUpdate> {
@@ -274,21 +288,48 @@ async function classifierNode(
 
   try {
     if (runtime.model?.withStructuredOutput) {
-      const structuredModel = runtime.model.withStructuredOutput(intentSchema);
-      const result = intentSchema.parse(
-        await structuredModel.invoke(buildClassifierMessages(runtime.input)),
+      const structuredModel = runtime.model.withStructuredOutput(triageSchema);
+      const result = triageSchema.parse(
+        await structuredModel.invoke(buildTriageMessages(runtime.input)),
       );
+      const intent = intentForTriageAction(result.action);
+      const handoffReason = result.reason?.trim() ?? "";
+      const response = result.response?.trim() ?? "";
+      const triageMessage = buildTriageMessage({
+        action: result.action,
+        intent,
+        reason: handoffReason,
+        response,
+      });
 
       return {
-        intent: result.intent,
-        reasoning: result.reasoning,
+        messages: [triageMessage],
+        intent,
+        reasoning: handoffReason,
+        handoffReason,
+        ...(result.action === "answer"
+          ? {
+              chatResponse: response,
+              summary: response,
+            }
+          : {}),
       };
     }
   } catch {
-    // Classification should not block the graph.
+    // Triage should not block the graph.
   }
 
-  return classifyIntentByRules(runtime.input);
+  const fallback = classifyIntentByRules(runtime.input);
+
+  return {
+    ...fallback,
+    handoffReason: fallback.reasoning,
+    messages: [
+      new AIMessage(
+        `triage fallback: intent=${fallback.intent}; reason=${fallback.reasoning}`,
+      ),
+    ],
+  };
 }
 
 function clarifyNode(
@@ -365,8 +406,8 @@ async function riskNode(
   }
 
   const extraction = ensureExtraction(state.extracted);
-  const analysisText = ensureText(
-    state.analysisResult ?? state.analysis,
+  const analysisText = analysisContextForRiskAndSummary(
+    state,
     "analysis subgraph output is required before risk review",
   );
   const riskReview = await runtime.agents.riskReviewAgent.invoke({
@@ -395,8 +436,8 @@ async function summaryNode(
 
   const extraction = ensureExtraction(state.extracted);
   const extractionText = JSON.stringify(extraction);
-  const analysisText = ensureText(
-    state.analysisResult ?? state.analysis,
+  const analysisText = analysisContextForRiskAndSummary(
+    state,
     "analysis subgraph output is required before summary",
   );
   const riskReview = ensureText(
@@ -518,7 +559,6 @@ function normalizeGraphInput(
     model: input.model,
     summaryModel: input.summaryModel ?? buildSummaryModel(input.model),
     analysisTools,
-    analysisModel: buildAnalysisModel(input.model, analysisTools),
     graphTrace: input.graphTrace ?? [],
     steps: [],
   };
@@ -533,6 +573,7 @@ function buildResult(
   const base = {
     intent: state.intent,
     reasoning: state.reasoning ?? null,
+    handoffReason: state.handoffReason || null,
     queryResponse: state.queryResponse ?? null,
     chatResponse: state.chatResponse ?? null,
     critique: state.critique ?? null,
@@ -577,27 +618,74 @@ function routeByIntent(state: RequirementAnalysisStateValue) {
   }
 
   if (state.intent === "chat") {
+    if (state.chatResponse) {
+      return END;
+    }
+
     return GRAPH_NODE.chatHandler;
   }
 
   return GRAPH_NODE.extract;
 }
 
-function buildClassifierMessages(input: string): BaseMessage[] {
+function routeAfterClarify(state: RequirementAnalysisStateValue) {
+  if (state.intent === "risk_only") {
+    return GRAPH_NODE.risk;
+  }
+
+  return GRAPH_NODE.analysis;
+}
+
+function buildTriageMessages(input: string): BaseMessage[] {
   return [
     new SystemMessage(
       [
-        "你是需求请求意图分类器。请只判断当前请求属于 analyze、query、chat 之一。",
-        "analyze：用户提出新需求、描述功能、请求评估、分析可行性或风险。",
-        "query：用户查询已有需求、需求编号、状态、进度、报告或历史分析结果。",
-        "chat：用户只是问候、寒暄或闲聊，没有提出分析或查询诉求。",
-        "边界情况：例如“查询 REQ-20240315-001 的风险分析报告”应判定为 query。",
-        "优先级：需求编号 + 查询词 优先判定为 query；纯闲聊优先判定为 chat；其余默认 analyze。",
-        "输出必须包含 intent 和 reasoning。",
+        "你是需求分析工作流的 triageNode，负责决定是否直接回答，或把请求交接给后续子图。",
+        "返回 action、response、reason 三个字段。",
+        "action=answer：当用户只是问候、闲聊、要求很短的直接说明，或你已经能直接给出安全回答时使用。response 必须包含直接回复。",
+        "action=handoff_to_analysis：当用户提出新需求、功能描述、方案补充、可行性分析、复杂度评估或多专家分析时使用。",
+        "action=handoff_to_risk：当用户主要要求风险、合规、政策、人工复核、退货/退款资格等判断，且不需要先做完整功能拆解时使用。",
+        "边界：需求编号 + 查询状态/报告这类问题，如果无法直接回答，可以让 fallback query 处理；结构化 triage 成功时优先选择 answer 或 handoff。",
+        "reason 要简短说明交接理由。",
       ].join("\n"),
     ),
     new HumanMessage(input),
   ];
+}
+
+function buildTriageMessage({
+  action,
+  intent,
+  reason,
+  response,
+}: {
+  action: RequirementTriageAction;
+  intent: RequirementIntent;
+  reason: string;
+  response: string;
+}) {
+  return new AIMessage(
+    [
+      `triage action: ${action}`,
+      `mapped intent: ${intent}`,
+      reason ? `handoff reason: ${reason}` : "handoff reason: none",
+      response ? `response: ${response}` : "response: none",
+    ].join("\n"),
+  );
+}
+
+function intentForTriageAction(
+  action: RequirementTriageAction,
+): RequirementIntent {
+  if (action === "answer") {
+    return "chat";
+  }
+
+  if (action === "handoff_to_risk") {
+    return "risk_only";
+  }
+
+  return "analyze";
 }
 
 function classifyIntentByRules(input: string): {
@@ -664,20 +752,6 @@ function getRuntime(
   }
 
   return runtime;
-}
-
-function buildAnalysisModel(
-  model: ChatModelLike | undefined,
-  analysisTools: AnalysisTools,
-) {
-  if (
-    !model ||
-    typeof (model as Partial<ToolBindableModelLike>).bindTools !== "function"
-  ) {
-    return undefined;
-  }
-
-  return (model as ToolBindableModelLike).bindTools(analysisTools);
 }
 
 function buildSummaryModel(model: ChatModelLike | undefined) {
@@ -816,6 +890,20 @@ function ensureText(value: string | null | undefined, message: string) {
   }
 
   return value;
+}
+
+function analysisContextForRiskAndSummary(
+  state: RequirementAnalysisStateValue,
+  message: string,
+) {
+  if (state.intent === "risk_only") {
+    return ensureText(
+      state.handoffReason || state.reasoning || "risk-only handoff",
+      message,
+    );
+  }
+
+  return ensureText(state.analysisResult ?? state.analysis, message);
 }
 
 function messageContentToText(content: unknown) {
