@@ -52,7 +52,7 @@ export default function Home() {
             className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
             href="/analysis-graph"
           >
-            打开分析子图测试页
+            Supervisor 多专家测试
           </Link>
         </header>
 

@@ -32,10 +32,13 @@ function createAnalyzeServiceFactory(options: ServiceModelOptions) {
   const candidateOrder: AgentName[] = ['extractAgent', 'riskReviewAgent', 'qaAgent', 'summaryAgent'];
   let agentIndex = 0;
 
-  const runnable = RunnableLambda.from(async (promptValue: { toChatMessages: () => BaseMessage[] }) => {
-    const messages = promptValue.toChatMessages();
+  const runnable = RunnableLambda.from(async (promptValue: BaseMessage[] | { toChatMessages: () => BaseMessage[] }) => {
+    const isDirectChatMessages = Array.isArray(promptValue);
+    const messages = isDirectChatMessages ? promptValue : promptValue.toChatMessages();
     const system = String(messages[0]?.content ?? '');
-    const matchedAgent = candidateOrder.find((agentName) => system.includes(agentName)) ?? candidateOrder[agentIndex];
+    const matchedAgent = isDirectChatMessages
+      ? 'summaryAgent'
+      : candidateOrder.find((agentName) => system.includes(agentName)) ?? candidateOrder[agentIndex];
 
     if (!matchedAgent) {
       throw new Error(`Unexpected prompt: ${system}`);
@@ -72,8 +75,19 @@ function createAnalyzeServiceFactory(options: ServiceModelOptions) {
       ),
   );
 
+  let structuredInvokeIndex = 0;
+
   runnable.withStructuredOutput = jest.fn(() => ({
-    invoke: jest.fn().mockResolvedValue({ intent: 'analyze', reasoning: 'service analyze flow' }),
+    invoke: jest.fn(async () => {
+      const currentIndex = structuredInvokeIndex;
+      structuredInvokeIndex += 1;
+
+      if (currentIndex === 0) {
+        return { intent: 'analyze', reasoning: 'service analyze flow' };
+      }
+
+      return { pass: true, critique: '', issues: [] };
+    }),
   }));
 
   return {

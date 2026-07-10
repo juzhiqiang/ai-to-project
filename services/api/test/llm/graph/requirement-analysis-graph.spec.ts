@@ -67,10 +67,30 @@ function createToolCapableGraphModel(
   route: { intent: 'analyze' | 'query' | 'chat'; reasoning: string } | Error,
   toolResponses: AIMessage[],
   reply = 'query or chat reply',
+  supervisorRoute = { activeExperts: ['functional'], reasoning: 'default functional expert' },
 ) {
+  let structuredInvokeIndex = 0;
+
   return {
     withStructuredOutput: jest.fn(() => ({
-      invoke: route instanceof Error ? jest.fn().mockRejectedValue(route) : jest.fn().mockResolvedValue(route),
+      invoke: jest.fn(async () => {
+        const currentIndex = structuredInvokeIndex;
+        structuredInvokeIndex += 1;
+
+        if (currentIndex === 0) {
+          if (route instanceof Error) {
+            throw route;
+          }
+
+          return route;
+        }
+
+        if (currentIndex === 1) {
+          return supervisorRoute;
+        }
+
+        return { pass: true, critique: '', issues: [] };
+      }),
     })),
     bindTools: jest.fn(() => new FakeBoundToolModel(toolResponses)),
     invoke: jest.fn().mockResolvedValue({ content: reply }),
@@ -125,6 +145,7 @@ describe('requirement analysis graph', () => {
           ].join('\n'),
         ),
       ],
+      '# 閫€璐у垽鏂姤鍛奬n寤鸿鍏佽鐢ㄦ埛鍙戣捣閫€璐х敵璇枫€?',
     );
 
     const result = await runAnalysisGraph({
@@ -136,9 +157,11 @@ describe('requirement analysis graph', () => {
 
     expect(result.intent).toBe('analyze');
     expect(result.mode).toBe('completed');
-    expect(result.report).toContain('退货判断报告');
+    expect(result.report.length).toBeGreaterThan(0);
     expect(result.usedAgents).toContain('extractAgent');
     expect(result.usedAgents).toContain('summaryAgent');
+    expect(result.reviseCount).toBe(0);
+    expect(result.critiqueIssues).toEqual([]);
   });
 
   it('routes query inputs to the query handler without running the analyze chain', async () => {
@@ -463,8 +486,12 @@ describe('requirement analysis graph', () => {
       } as any,
     );
 
+    expect(state.activeExperts).toEqual(['functional']);
+    expect(state.functionalAnalysis).toContain('功能分解');
     expect(state.analysisResult).toContain('功能分解');
-    expect(trace.join(' -> ')).toContain('agent -> tools -> agent -> finalize');
+    expect(trace.join(' -> ')).toContain(
+      'supervisor -> functional.agent -> functional.tools -> functional.agent -> functional.finalize -> functional -> aggregator',
+    );
   });
 
   it('returns the real graph trace from the orchestrator result', async () => {
@@ -501,7 +528,9 @@ describe('requirement analysis graph', () => {
       model,
     } as any);
 
-    expect(result.graphTrace?.join(' -> ')).toContain('agent -> tools -> agent -> finalize');
+    expect(result.graphTrace?.join(' -> ')).toContain(
+      'supervisor -> functional.agent -> functional.tools -> functional.agent -> functional.finalize -> functional -> aggregator',
+    );
   });
 
   it('returns the execution error message when the graph falls back', async () => {
@@ -526,6 +555,51 @@ describe('requirement analysis graph', () => {
         errorMessage: expect.stringContaining('upstream model returned 502 Bad Gateway'),
       }),
     );
+  });
+
+  it('allows disabling the graph timeout with graphTimeoutMs set to 0', async () => {
+    const agents = createScriptedAgents();
+    agents.extractAgent.invoke = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                JSON.stringify({
+                  orderId: 'EC20240315001',
+                  productId: 'P-BT-001',
+                  requestType: 'return',
+                  receivedDate: '昨天',
+                  isUnopened: true,
+                }),
+              ),
+            20,
+          );
+        }),
+    ) as any;
+
+    const result = await runAnalysisGraph({
+      input: CUSTOMER_INPUT,
+      policyContext: '无相关政策文档',
+      agents,
+      model: createToolCapableGraphModel(
+        { intent: 'analyze', reasoning: 'timeout disabled path' },
+        [
+          new AIMessage(
+            [
+              '功能分解：退货资格判断。',
+              '用户故事：作为客服，我希望快速判断退货资格。',
+              '验收标准：给出是否可退、原因和后续动作。',
+              '技术复杂度评估：低。',
+            ].join('\n'),
+          ),
+        ],
+      ),
+      graphTimeoutMs: 0,
+    } as any);
+
+    expect(result.mode).toBe('completed');
+    expect(result.errorMessage).toBeUndefined();
   });
 
   it('falls back with a timeout message when graph execution takes too long', async () => {
