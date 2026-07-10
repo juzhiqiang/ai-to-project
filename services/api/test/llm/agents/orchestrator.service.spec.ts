@@ -1,6 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { RunnableLambda } from '@langchain/core/runnables';
-import { OrchestratorService } from '../../../src/llm/agents/orchestrator.service';
+import { OrchestratorService, toUIResponse } from '../../../src/llm/agents/orchestrator.service';
 import * as requirementAnalysisGraph from '../../../src/llm/graph/requirement-analysis-graph';
 import type { ChatModelFactory } from '../../../src/llm/model.factory';
 
@@ -98,6 +98,53 @@ function createAnalyzeServiceFactory(options: ServiceModelOptions) {
 }
 
 describe('OrchestratorService', () => {
+  it('renders HITL confirmation when the orchestrator is interrupted', () => {
+    const response = toUIResponse(
+      {
+        mode: 'completed',
+        clarificationQuestions: [],
+        usedAgents: [],
+        fallback: null,
+        steps: [],
+        graphTrace: [],
+        report: '等待人工确认。',
+      },
+      { interrupted: true },
+    );
+
+    expect(response.components).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'confirmation',
+          id: 'human-in-the-loop-confirmation',
+        }),
+      ]),
+    );
+  });
+
+  it('renders expert steps dynamically from activeExperts', () => {
+    const response = toUIResponse({
+      mode: 'completed',
+      clarificationQuestions: [],
+      usedAgents: [],
+      fallback: null,
+      steps: [],
+      graphTrace: [],
+      report: 'ok',
+      activeExperts: ['functional', 'security'],
+      functionalAnalysis: '功能完成',
+      securityAnalysis: null,
+    });
+    const steps = response.components.find((component) => component.type === 'steps') as any;
+
+    expect(steps.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'functional_expert', status: 'completed' }),
+        expect.objectContaining({ label: 'security_expert', status: 'running' }),
+      ]),
+    );
+  });
+
   it('passes the provided policy context into the downstream qa and summary agents', async () => {
     const { factory, seenPrompts } = createAnalyzeServiceFactory({
       agentOutputs: {

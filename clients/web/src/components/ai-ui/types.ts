@@ -109,7 +109,7 @@ export interface UISteps {
 
 export interface UIStepItem {
   label: string;
-  status: "pending" | "current" | "completed" | "failed";
+  status: "pending" | "current" | "running" | "completed" | "failed";
   description?: string;
 }
 

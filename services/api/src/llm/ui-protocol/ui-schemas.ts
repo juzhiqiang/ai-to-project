@@ -117,7 +117,7 @@ const stepsSchema = z.object({
   steps: z.array(
     z.object({
       label: z.string().min(1),
-      status: z.enum(['pending', 'current', 'completed', 'failed']),
+      status: z.enum(['pending', 'current', 'running', 'completed', 'failed']),
       description: z.string().optional(),
     }),
   ).min(1),

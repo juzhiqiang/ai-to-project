@@ -6,6 +6,7 @@ const pageSource = readFileSync(new URL("./app/page.tsx", import.meta.url), "utf
 const analysisGraphPagePath = new URL("./app/analysis-graph/page.tsx", import.meta.url);
 const triagePagePath = new URL("./app/triage/page.tsx", import.meta.url);
 const planExecutePagePath = new URL("./app/plan-execute/page.tsx", import.meta.url);
+const productionReadinessPagePath = new URL("./app/production-readiness/page.tsx", import.meta.url);
 const agentsOrchestrateRoutePath = new URL("./app/api/agents/orchestrate/route.ts", import.meta.url);
 const agentsPlanExecuteRoutePath = new URL("./app/api/agents/plan-execute/route.ts", import.meta.url);
 const criticRefinePageSource = readFileSync(new URL("./app/critic-refine/page.tsx", import.meta.url), "utf8");
@@ -29,6 +30,11 @@ test("home page links to the triage handoff playground", () => {
 test("home page links to the plan execute pipeline playground", () => {
   assert.match(pageSource, /href="\/plan-execute"/);
   assert.match(pageSource, /Plan Execute/);
+});
+
+test("home page links to the production readiness dashboard", () => {
+  assert.match(pageSource, /href="\/production-readiness"/);
+  assert.match(pageSource, /Production Readiness/);
 });
 
 test("critic refine route reuses the graph playground implementation", () => {
@@ -149,4 +155,18 @@ test("plan execute page calls the pipeline API route and renders reflexion field
   assert.match(planExecutePageSource, /reflections/);
   assert.match(planExecutePageSource, /retryCount/);
   assert.match(planExecutePageSource, /stepResults/);
+});
+
+test("production readiness page renders degradation, saver, ui protocol, and budget controls", () => {
+  assert.equal(existsSync(productionReadinessPagePath), true);
+
+  const pageSource = readFileSync(productionReadinessPagePath, "utf8");
+
+  assert.match(pageSource, /Production Readiness/);
+  assert.match(pageSource, /PostgresSaver/);
+  assert.match(pageSource, /human-in-the-loop-confirmation/);
+  assert.match(pageSource, /functional_expert/);
+  assert.match(pageSource, /maxSteps = 6/);
+  assert.match(pageSource, /maxRevises = 2/);
+  assert.match(pageSource, /retryCount <= 1/);
 });

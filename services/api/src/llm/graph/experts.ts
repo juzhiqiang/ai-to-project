@@ -67,8 +67,11 @@ export interface AnalysisSupervisorSubGraphOptions {
   graphTrace?: string[];
 }
 
-const supervisorSchema = z.object({
-  activeExperts: z.array(z.enum(ANALYSIS_EXPERT_NAMES)).default(["functional"]),
+export const supervisorSchema = z.object({
+  activeExperts: z
+    .array(z.enum(ANALYSIS_EXPERT_NAMES))
+    .max(ANALYSIS_EXPERT_NAMES.length)
+    .default(["functional"]),
   reasoning: z.string().default(""),
 });
 
@@ -183,10 +186,16 @@ export function createExpertSubGraph(options: ExpertSubGraphOptions) {
   ): Promise<ExpertSubgraphStateUpdate> {
     pushTrace(options.graphTrace, `${options.expertName}.agent`);
 
-    const response = await boundModel.invoke([
-      new SystemMessage(options.systemPrompt),
-      ...state.messages,
-    ]);
+    let response: BaseMessage;
+
+    try {
+      response = await boundModel.invoke([
+        new SystemMessage(options.systemPrompt),
+        ...state.messages,
+      ]);
+    } catch (error) {
+      response = new AIMessage(buildExpertFallbackOutput(options.expertName, error));
+    }
 
     return { messages: [response] };
   }
@@ -438,7 +447,13 @@ export function aggregatorNode(
       return [];
     }
 
-    return [`## ${EXPERT_LABELS[expertName]}\n${output.trim()}`];
+    const trimmed = output.trim();
+
+    if (isExpertFallbackOutput(trimmed)) {
+      return [`## ${EXPERT_LABELS[expertName]}\n> 生产降级：${trimmed}`];
+    }
+
+    return [`## ${EXPERT_LABELS[expertName]}\n${trimmed}`];
   });
 
   return {
@@ -580,6 +595,27 @@ function messageContentToText(content: unknown) {
   }
 
   return String(content ?? "");
+}
+
+function buildExpertFallbackOutput(
+  expertName: AnalysisExpertName,
+  error: unknown,
+) {
+  return `[${expertName} 专家暂不可用：${errorToText(error)}] 本项分析已跳过，建议人工补充。`;
+}
+
+function isExpertFallbackOutput(output: string) {
+  return /^\[(functional|performance|security|compliance) 专家暂不可用：/.test(
+    output,
+  );
+}
+
+function errorToText(error: unknown) {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
 }
 
 function textAnnotation() {

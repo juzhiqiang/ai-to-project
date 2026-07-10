@@ -53,6 +53,17 @@ const GRAPH_NODE = {
   chatHandler: "chatHandler",
 } as const;
 
+interface PostgresSaverLike {
+  setup(): Promise<void> | void;
+}
+
+interface PostgresSaverModuleLike {
+  PostgresSaver?: {
+    fromConnString(databaseUrl: string): PostgresSaverLike;
+  };
+  fromConnString?: (databaseUrl: string) => PostgresSaverLike;
+}
+
 export const triageSchema = z.object({
   action: z.enum(TRIAGE_ACTIONS),
   response: z.string().nullish(),
@@ -120,6 +131,7 @@ export interface RequirementAnalysisGraphInput extends OrchestratorInput {
   summaryModel?: SummaryModelLike;
   graphTrace?: string[];
   graphTimeoutMs?: number | null;
+  threadId?: string;
 }
 
 export interface RequirementClarification {
@@ -229,6 +241,35 @@ export function createAnalysisGraph() {
     .compile();
 }
 
+export function buildRequirementThreadId(userId: string, sessionId: string) {
+  return `user-${userId}:session-${sessionId}`;
+}
+
+export async function configurePostgresSaver(options?: {
+  databaseUrl?: string;
+  loadPostgresSaver?: () => Promise<PostgresSaverModuleLike>;
+}) {
+  const databaseUrl = options?.databaseUrl ?? process.env.DATABASE_URL ?? "";
+
+  if (!databaseUrl.trim()) {
+    return undefined;
+  }
+
+  const module = options?.loadPostgresSaver
+    ? await options.loadPostgresSaver()
+    : await loadPostgresSaverModule();
+  const saverFactory = module.PostgresSaver?.fromConnString ?? module.fromConnString;
+
+  if (!saverFactory) {
+    throw new Error("PostgresSaver.fromConnString is required");
+  }
+
+  const checkpointer = saverFactory(databaseUrl);
+  await checkpointer.setup();
+
+  return checkpointer;
+}
+
 export async function runAnalysisGraph(
   input: RequirementAnalysisGraphInput,
 ): Promise<OrchestratorResult> {
@@ -236,9 +277,13 @@ export async function runAnalysisGraph(
 
   try {
     const graph = createAnalysisGraph();
+    const configurable = input.threadId ? { thread_id: input.threadId } : undefined;
     const statePromise = graph.invoke(
       { messages: [], toolLoopCount: 0, analysisResult: null },
-      { context: { requirementAnalysis: runtime } },
+      {
+        context: { requirementAnalysis: runtime },
+        ...(configurable ? { configurable } : {}),
+      } as any,
     );
     const state = shouldApplyGraphTimeout(input.graphTimeoutMs)
       ? await withTimeout(statePromise, input.graphTimeoutMs)
@@ -956,6 +1001,15 @@ function shouldApplyGraphTimeout(
   timeoutMs: number | null | undefined,
 ): timeoutMs is number {
   return typeof timeoutMs === "number" && timeoutMs > 0;
+}
+
+async function loadPostgresSaverModule(): Promise<PostgresSaverModuleLike> {
+  const dynamicImport = new Function(
+    "specifier",
+    "return import(specifier)",
+  ) as (specifier: string) => Promise<PostgresSaverModuleLike>;
+
+  return dynamicImport("@langchain/langgraph-checkpoint-postgres");
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {

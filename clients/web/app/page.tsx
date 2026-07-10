@@ -51,6 +51,12 @@ export default function Home() {
           <div className="flex flex-wrap gap-2">
             <Link
               className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/production-readiness"
+            >
+              Production Readiness
+            </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
               href="/plan-execute"
             >
               Plan Execute

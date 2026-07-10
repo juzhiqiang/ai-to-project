@@ -3,7 +3,12 @@ import { runAnalysisGraph as runAnalysisGraphFromAgentEntry } from '../../../src
 import type { CustomerServiceAgents } from '../../../src/llm/agents/sub-agents';
 import { createAnalysisSubGraph } from '../../../src/llm/graph/analysis-subgraph';
 import { createAnalysisTools } from '../../../src/llm/graph/analysis-tools';
-import { createAnalysisGraph, runAnalysisGraph } from '../../../src/llm/graph/requirement-analysis-graph';
+import {
+  buildRequirementThreadId,
+  configurePostgresSaver,
+  createAnalysisGraph,
+  runAnalysisGraph,
+} from '../../../src/llm/graph/requirement-analysis-graph';
 
 const CUSTOMER_INPUT = '订单 EC20240315001，昨天签收，商品未拆封，我想申请退货。';
 
@@ -107,6 +112,22 @@ function createToolCapableGraphModel(
 }
 
 describe('requirement analysis graph', () => {
+  it('builds stable production thread ids for user sessions', () => {
+    expect(buildRequirementThreadId('u-100', 's-200')).toBe('user-u-100:session-s-200');
+  });
+
+  it('configures PostgresSaver only when a database url is available', async () => {
+    const setup = jest.fn().mockResolvedValue(undefined);
+    const saver = { setup };
+    const loadPostgresSaver = jest.fn().mockResolvedValue({
+      fromConnString: jest.fn().mockReturnValue(saver),
+    });
+
+    await expect(configurePostgresSaver({ databaseUrl: '' })).resolves.toBeUndefined();
+    await expect(configurePostgresSaver({ databaseUrl: 'postgresql://localhost/db', loadPostgresSaver })).resolves.toBe(saver);
+    expect(setup).toHaveBeenCalled();
+  });
+
   it('keeps the Ch6 agent entry as a graph delegate', () => {
     expect(runAnalysisGraphFromAgentEntry).toBe(runAnalysisGraph);
   });

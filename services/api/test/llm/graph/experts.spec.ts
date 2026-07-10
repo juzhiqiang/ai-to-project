@@ -1,5 +1,5 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import { createAnalysisSupervisorSubGraph, createFunctionalExpert } from '../../../src/llm/graph/experts';
+import { createAnalysisSupervisorSubGraph, createFunctionalExpert, supervisorSchema } from '../../../src/llm/graph/experts';
 import { createAnalysisTools } from '../../../src/llm/graph/analysis-tools';
 
 class FakeBoundToolModel {
@@ -94,5 +94,38 @@ describe('analysis supervisor experts', () => {
     expect(state.analysisResult).not.toContain('合规专家结论');
     expect(graphTrace).toContain('supervisor');
     expect(graphTrace).toContain('aggregator');
+  });
+
+  it('writes an expert fallback output when the expert model fails and marks it in aggregation', async () => {
+    const functional = {
+      invoke: jest.fn().mockRejectedValue(new Error('model overloaded')),
+    } as unknown as FakeBoundToolModel;
+    const graph = createAnalysisSupervisorSubGraph({
+      model: createSupervisorModel(['functional'], [functional]),
+      tools: createAnalysisTools(),
+    });
+
+    const state = await graph.invoke({
+      messages: [new HumanMessage('新增批量导入能力')],
+    } as any);
+
+    expect(state.functionalAnalysis).toContain('[functional 专家暂不可用：Error: model overloaded]');
+    expect(state.analysisResult).toContain('> 生产降级');
+    expect(state.analysisResult).toContain('建议人工补充');
+  });
+
+  it('caps supervisor activeExperts at four through the structured schema', () => {
+    const parsed = supervisorSchema.parse({
+      activeExperts: ['functional', 'performance', 'security', 'compliance'],
+      reasoning: 'all experts',
+    });
+
+    expect(parsed.activeExperts).toHaveLength(4);
+    expect(() =>
+      supervisorSchema.parse({
+        activeExperts: ['functional', 'performance', 'security', 'compliance', 'functional'],
+        reasoning: 'too many',
+      }),
+    ).toThrow();
   });
 });

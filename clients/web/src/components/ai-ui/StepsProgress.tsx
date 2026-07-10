@@ -26,6 +26,8 @@ function indicatorClassName(step: UIStepItem) {
       return `${base} bg-emerald-100 text-emerald-700`;
     case "current":
       return `${base} bg-zinc-950 text-white`;
+    case "running":
+      return `${base} bg-sky-100 text-sky-700`;
     case "failed":
       return `${base} bg-red-100 text-red-700`;
     case "pending":
