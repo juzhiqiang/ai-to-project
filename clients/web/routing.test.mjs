@@ -202,4 +202,75 @@ test("token estimator page renders interactive testing controls", () => {
   assert.match(pageSource, /后端模型/);
   assert.match(pageSource, /以上价格示例自 2025-2026/);
   assert.doesNotMatch(pageSource, /id="model-name"/);
+})
+;
+;
+
+const agentModelSetFilePath = "D:\\myProject\\ai-to-Project\\services\\api\\src\\llm\\cost\\agent-model-set.ts";
+// 8.3 节：按角色默认 + 运行时覆盖的模型分级
+test("agent-model-set.ts exports required types and functions", () => {
+  const source = readFileSync(agentModelSetFilePath, "utf8");
+
+  // 类型导出
+  assert.match(source, /export type AgentName/);
+  assert.match(source, /export interface AgentModelSet/);
+
+  // 常量导出
+  assert.match(source, /export const HIGH_RISK_AGENTS/);
+  assert.match(source, /export const DEFAULT_AGENT_MODEL_SET/);
+  assert.match(source, /export const AGENT_TO_CONFIG_KEY/);
+
+  // 函数导出
+  assert.match(source, /export function resolveModelForAgent/);
+});
+
+test("HIGH_RISK_AGENTS contains 5 high-risk roles", () => {
+  const source = readFileSync(agentModelSetFilePath, "utf8");
+
+  // HIGH_RISK_AGENTS 包含 5 个高风险角色
+  assert.match(source, /'supervisor'/);
+  assert.match(source, /'security_expert'/);
+  assert.match(source, /'compliance_expert'/);
+  assert.match(source, /'summary_agent'/);
+  assert.match(source, /'critic'/);
+});
+
+test("resolveModelForAgent follows decision order: budget >=100, budget 80-100, low complexity, default", () => {
+  const source = readFileSync(agentModelSetFilePath, "utf8");
+
+  // 决策顺序必须严格：budget >= 100 -> budget 80-100 -> low complexity -> default
+  const budgetRejectIdx = source.indexOf('budget_exceeded_reject');
+  const budgetTightIdx = source.indexOf('budget_tight_downgrade');
+  const lowComplexityIdx = source.indexOf('low_complexity_downgrade');
+
+  assert.strictEqual(budgetRejectIdx > 0, true);
+  assert.strictEqual(budgetTightIdx > budgetRejectIdx, true);
+  assert.strictEqual(lowComplexityIdx > budgetTightIdx, true);
+});
+
+test("DEFAULT_AGENT_MODEL_SET assigns correct modelConfigId per role", () => {
+  const source = readFileSync(agentModelSetFilePath, "utf8");
+
+  // 高风险角色使用 demo-gpt-4o
+  assert.match(source, /supervisorModelConfigId.*demo-gpt-4o/);
+  assert.match(source, /securityModelConfigId.*demo-gpt-4o/);
+  assert.match(source, /complianceModelConfigId.*demo-gpt-4o/);
+  assert.match(source, /summaryModelConfigId.*demo-gpt-4o/);
+  assert.match(source, /criticModelConfigId.*demo-gpt-4o/);
+
+  // functional/performance/risk 使用 demo-gpt-4o-mini
+  assert.match(source, /functionalModelConfigId.*demo-gpt-4o-mini/);
+  assert.match(source, /performanceModelConfigId.*demo-gpt-4o-mini/);
+  assert.match(source, /riskModelConfigId.*demo-gpt-4o-mini/);
+
+  // compressor 使用 demo-deepseek-chat
+  assert.match(source, /compressorModelConfigId.*demo-deepseek-chat/);
+});
+
+test("agent-model-set has no import of PrismaClient or ChatOpenAI", () => {
+  const source = readFileSync(agentModelSetFilePath, "utf8");
+
+  assert.doesNotMatch(source, /import.*PrismaClient/);
+  assert.doesNotMatch(source, /import.*ChatOpenAI/);
+  assert.doesNotMatch(source, /from.*@prisma/);
 });
