@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgentsController } from './agents/agents.controller';
+import { TokenEstimatorController } from './cost/token-estimator.controller';
 import { OrchestratorService } from './agents/orchestrator.service';
 import { EmbeddingController } from './embedding/embedding.controller';
 import { EmbeddingService } from './embedding/embedding.service';
@@ -16,7 +17,14 @@ import { UIProtocolModule } from './ui-protocol/ui-protocol.module';
 
 @Module({
   imports: [UIProtocolModule],
-  controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController],
+  controllers: [
+    LlmController,
+    MemoryController,
+    FilesController,
+    EmbeddingController,
+    AgentsController,
+    TokenEstimatorController,
+  ],
   providers: [
     LlmService,
     RequirementService,

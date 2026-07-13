@@ -1,6 +1,6 @@
 llm:
   provider: openai
-  model: grok-4.3-high
+  model: gpt-5.5
   temperature: 0
   maxTokens: 4096
 retrieval:

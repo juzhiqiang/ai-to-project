@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -7,8 +7,10 @@ const analysisGraphPagePath = new URL("./app/analysis-graph/page.tsx", import.me
 const triagePagePath = new URL("./app/triage/page.tsx", import.meta.url);
 const planExecutePagePath = new URL("./app/plan-execute/page.tsx", import.meta.url);
 const productionReadinessPagePath = new URL("./app/production-readiness/page.tsx", import.meta.url);
+const tokenEstimatorPagePath = new URL("./app/token-estimator/page.tsx", import.meta.url);
 const agentsOrchestrateRoutePath = new URL("./app/api/agents/orchestrate/route.ts", import.meta.url);
 const agentsPlanExecuteRoutePath = new URL("./app/api/agents/plan-execute/route.ts", import.meta.url);
+const tokenEstimatorRoutePath = new URL("./app/api/cost/token-estimate/route.ts", import.meta.url);
 const criticRefinePageSource = readFileSync(new URL("./app/critic-refine/page.tsx", import.meta.url), "utf8");
 const nextConfigSource = readFileSync(new URL("./next.config.ts", import.meta.url), "utf8");
 
@@ -35,6 +37,11 @@ test("home page links to the plan execute pipeline playground", () => {
 test("home page links to the production readiness dashboard", () => {
   assert.match(pageSource, /href="\/production-readiness"/);
   assert.match(pageSource, /Production Readiness/);
+});
+
+test("home page links to the token cost estimator", () => {
+  assert.match(pageSource, /href="\/token-estimator"/);
+  assert.match(pageSource, /Token Cost Estimator/);
 });
 
 test("critic refine route reuses the graph playground implementation", () => {
@@ -76,6 +83,17 @@ test("web owns an explicit plan execute proxy route with readable backend errors
   assert.match(routeSource, /API_ORIGIN/);
   assert.match(routeSource, /\/api\/agents\/plan-execute/);
   assert.match(routeSource, /Backend plan execute request failed/);
+  assert.match(routeSource, /status:\s*502/);
+});
+
+test("web owns an explicit token estimator proxy route with readable backend errors", () => {
+  assert.equal(existsSync(tokenEstimatorRoutePath), true);
+
+  const routeSource = readFileSync(tokenEstimatorRoutePath, "utf8");
+
+  assert.match(routeSource, /API_ORIGIN/);
+  assert.match(routeSource, /\/api\/cost\/token-estimate/);
+  assert.match(routeSource, /Backend token estimator request failed/);
   assert.match(routeSource, /status:\s*502/);
 });
 
@@ -169,4 +187,19 @@ test("production readiness page renders degradation, saver, ui protocol, and bud
   assert.match(pageSource, /maxSteps = 6/);
   assert.match(pageSource, /maxRevises = 2/);
   assert.match(pageSource, /retryCount <= 1/);
+});
+
+test("token estimator page renders interactive testing controls", () => {
+  assert.equal(existsSync(tokenEstimatorPagePath), true);
+
+  const pageSource = readFileSync(tokenEstimatorPagePath, "utf8");
+
+  assert.match(pageSource, /Token Cost Estimator/);
+  assert.match(pageSource, /fetch\("\/api\/cost\/token-estimate"/);
+  assert.match(pageSource, /toolSchemas/);
+  assert.match(pageSource, /estimatedCostUsd/);
+  assert.match(pageSource, /真实调用/);
+  assert.match(pageSource, /后端模型/);
+  assert.match(pageSource, /以上价格示例自 2025-2026/);
+  assert.doesNotMatch(pageSource, /id="model-name"/);
 });
