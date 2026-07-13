@@ -24,7 +24,7 @@ export interface AgentModelSet {
   compressorModelConfigId: string;
 }
 
-// 高风险角色：错误会影响全局或法律敏感性，预算紧张时不允许降级
+// 高风险角色：错误会���响全局或法律敏感性，预算紧张时不允许降级
 export const HIGH_RISK_AGENTS: AgentName[] = [
   'supervisor',
   'security_expert',
