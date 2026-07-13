@@ -392,4 +392,107 @@ describe('10.8.3 withTokenUsage', () => {
     expect(mockFn).toHaveBeenCalled();
     expect(result).toEqual({ content: 'Test' });
   });
+})
+
+import { resolveBudgetAction, type BudgetPolicyInput } from '../src/llm/cost/budget-policy';
+
+describe('10.9.3 预算动作选择 - resolveBudgetAction', () => {
+  it('50% 预算 → allow', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 50,
+      agentName: 'functional_expert',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+    expect(result.reason).toContain('50');
+  });
+
+  it('85% 预算 + functional → downgrade，reason 含 85', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 85,
+      agentName: 'functional_expert',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('downgrade');
+    expect(result.reason).toContain('85');
+    expect(result.reason).toContain('downgrade');
+  });
+
+  it('90% 预算 + security_expert → allow（高风险不降级）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 90,
+      agentName: 'security_expert',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+    expect(result.reason).toContain('90');
+    expect(result.reason).toContain('high-risk');
+  });
+
+  it('110% 预算 + risk_agent → reject', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 110,
+      agentName: 'risk_agent',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('reject');
+    expect(result.reason).toContain('110');
+    expect(result.reason).toContain('exceeded');
+  });
+
+  it('110% 预算 + compressor → allow（豁免）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 110,
+      agentName: 'compressor',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+    expect(result.reason).toContain('compressor');
+  });
+
+  it('79% 预算 → allow（边界）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 79,
+      agentName: 'functional_expert',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+  });
+
+  it('80% 预算 + high-risk → allow（边界）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 80,
+      agentName: 'supervisor',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+    expect(result.reason).toContain('high-risk');
+  });
+
+  it('100% 预算 + compressor → allow（边界）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 100,
+      agentName: 'compressor',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('allow');
+  });
+
+  it('100% 预算 + non-compressor → reject（边界）', () => {
+    const input: BudgetPolicyInput = {
+      budgetUsedPercent: 100,
+      agentName: 'functional_expert',
+    };
+    const result = resolveBudgetAction(input);
+
+    expect(result.action).toBe('reject');
+  });
 });

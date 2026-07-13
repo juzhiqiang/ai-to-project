@@ -274,3 +274,47 @@ test("agent-model-set has no import of PrismaClient or ChatOpenAI", () => {
   assert.doesNotMatch(source, /import.*ChatOpenAI/);
   assert.doesNotMatch(source, /from.*@prisma/);
 });
+
+// 8.5 节：预算阈值 + 自动降级 + 拒绝的运行时策略
+test("budget-policy.ts exports required types and functions", () => {
+  const budgetPolicyPath = "D:\\myProject\\ai-to-Project\\services\\api\\src\\llm\\cost\\budget-policy.ts";
+  const source = readFileSync(budgetPolicyPath, "utf8");
+
+  // 类型导出
+  assert.match(source, /export type BudgetAction/);
+  assert.match(source, /export interface BudgetPolicyInput/);
+  assert.match(source, /export interface BudgetPolicyResult/);
+
+  // 函数导出
+  assert.match(source, /export function resolveBudgetAction/);
+});
+
+test("HIGH_RISK_AGENTS is imported from agent-model-set.ts", () => {
+  const budgetPolicyPath = "D:\\myProject\\ai-to-Project\\services\\api\\src\\llm\\cost\\budget-policy.ts";
+  const source = readFileSync(budgetPolicyPath, "utf8");
+
+  // HIGH_RISK_AGENTS should be imported, not duplicated
+  assert.match(source, /import.*HIGH_RISK_AGENTS.*from.*agent-model-set/);
+});
+
+test("resolveBudgetAction follows decision order: <80 allow, 80-100 downgrade/allow by risk, >=100 reject/allow compressor", () => {
+  const budgetPolicyPath = "D:\\myProject\\ai-to-Project\\services\\api\\src\\llm\\cost\\budget-policy.ts";
+  const source = readFileSync(budgetPolicyPath, "utf8");
+
+  // 决策顺序检查
+  const allowIdx = source.indexOf("action: 'allow'");
+  const downgradeIdx = source.indexOf("action: 'downgrade'");
+  const rejectIdx = source.indexOf("action: 'reject'");
+
+  assert.strictEqual(allowIdx > 0, true);
+  assert.strictEqual(downgradeIdx > allowIdx, true);
+  assert.strictEqual(rejectIdx > downgradeIdx, true);
+});
+
+test("budget-policy.ts has no import of PrismaClient or external DB", () => {
+  const budgetPolicyPath = "D:\\myProject\\ai-to-Project\\services\\api\\src\\llm\\cost\\budget-policy.ts";
+  const source = readFileSync(budgetPolicyPath, "utf8");
+
+  assert.doesNotMatch(source, /import.*PrismaClient/);
+  assert.doesNotMatch(source, /import.*@prisma/);
+});
