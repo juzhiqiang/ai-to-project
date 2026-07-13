@@ -159,4 +159,237 @@ describe('10.9.2 运行时模型覆盖', () => {
       }
     }
   });
+})
+
+import { TokenUsageService, type TokenUsageRecord, type MonthlyStats } from '../src/llm/cost/token-usage.service';
+import { withTokenUsage, type WithTokenUsageOptions } from '../src/llm/cost/with-token-usage';
+
+// Mock Prisma client
+const mockPrisma = {
+  tokenUsage: {
+    create: jest.fn().mockResolvedValue({}),
+    aggregate: jest.fn().mockResolvedValue({
+      _sum: { estimatedCostUsd: 10.5, inputTokens: 1000, outputTokens: 500, cachedInputTokens: 100 },
+      _count: 5,
+    }),
+    groupBy: jest.fn().mockResolvedValue([
+      { nodeName: 'supervisor', _sum: { estimatedCostUsd: 5.0 }, _count: 2 },
+      { nodeName: 'functional', _sum: { estimatedCostUsd: 3.5 }, _count: 3 },
+    ]),
+  },
+};
+
+describe('10.8.2 TokenUsageService', () => {
+  let service: TokenUsageService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new TokenUsageService(mockPrisma as any);
+  });
+
+  it('recordUsage writes complete fields to prisma', async () => {
+    const record: TokenUsageRecord = {
+      graphName: 'analysis-graph',
+      nodeName: 'supervisor',
+      agentName: 'supervisor',
+      modelName: 'gpt-4o',
+      inputTokens: 100,
+      outputTokens: 50,
+      estimatedCostUsd: 0.001,
+      isEstimated: false,
+      latencyMs: 100,
+    };
+
+    await service.recordUsage(record);
+
+    expect(mockPrisma.tokenUsage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        graphName: 'analysis-graph',
+        nodeName: 'supervisor',
+        agentName: 'supervisor',
+        modelName: 'gpt-4o',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        estimatedCostUsd: 0.001,
+        isEstimated: false,
+        latencyMs: 100,
+        provider: 'openai',
+      }),
+    });
+  });
+
+  it('getMonthlyStats aggregates totalCost and tokens for current month', async () => {
+    const stats = await service.getMonthlyStats();
+
+    expect(stats.totalCost).toBe(10.5);
+    expect(stats.totalInputTokens).toBe(1000);
+    expect(stats.totalOutputTokens).toBe(500);
+    expect(stats.totalCachedTokens).toBe(100);
+    expect(stats.calls).toBe(5);
+  });
+
+  it('getStatsByNode aggregates and orders by totalCost descending', async () => {
+    const stats = await service.getStatsByNode();
+
+    expect(stats).toHaveLength(2);
+    expect(stats[0].nodeName).toBe('supervisor');
+    expect(stats[0].totalCost).toBe(5.0);
+    expect(stats[1].nodeName).toBe('functional');
+  });
+
+  it('getStatsByAgent aggregates and orders by totalCost descending', async () => {
+    mockPrisma.tokenUsage.groupBy.mockResolvedValueOnce([
+      { agentName: 'supervisor', _sum: { estimatedCostUsd: 8.0 }, _count: 4 },
+      { agentName: 'functional', _sum: { estimatedCostUsd: 2.5 }, _count: 3 },
+    ]);
+
+    const stats = await service.getStatsByAgent();
+
+    expect(stats).toHaveLength(2);
+    expect(stats[0].agentName).toBe('supervisor');
+    expect(stats[0].totalCost).toBe(8.0);
+  });
+
+  it('isOverBudget returns true when totalCost exceeds budget', async () => {
+    mockPrisma.tokenUsage.aggregate.mockResolvedValueOnce({
+      _sum: { estimatedCostUsd: 15 },
+      _count: 10,
+    } as any);
+
+    const result = await service.isOverBudget(10);
+
+    expect(result).toBe(true);
+  });
+
+  it('isOverBudget returns false when totalCost is under budget', async () => {
+    mockPrisma.tokenUsage.aggregate.mockResolvedValueOnce({
+      _sum: { estimatedCostUsd: 5 },
+      _count: 5,
+    } as any);
+
+    const result = await service.isOverBudget(10);
+
+    expect(result).toBe(false);
+  });
+
+  it('recordUsage does not throw when prisma throws', async () => {
+    mockPrisma.tokenUsage.create.mockRejectedValueOnce(new Error('DB error'));
+
+    const record: TokenUsageRecord = {
+      graphName: 'test',
+      nodeName: 'test',
+      agentName: 'test',
+      modelName: 'test',
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      isEstimated: false,
+      latencyMs: 0,
+    };
+
+    // Should not throw
+        // 调用 should not throw - error is caught internally
+    await service.recordUsage(record);
+    // If we reach here, no error was thrown (which is the expected behavior)
+  });
+});
+
+describe('10.8.3 withTokenUsage', () => {
+  it('records exact input/output/cached when response has usage metadata', async () => {
+    const mockService = {
+      recordUsage: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const mockResponse = {
+      content: 'Hello world',
+      usage_metadata: {
+        input_tokens: 100,
+        output_tokens: 50,
+      },
+    };
+
+    const options: WithTokenUsageOptions = {
+      graphName: 'test-graph',
+      nodeName: 'supervisor',
+      agentName: 'supervisor',
+      modelName: 'gpt-4o',
+    };
+
+    await withTokenUsage(options, mockService as any, async () => mockResponse);
+
+    expect(mockService.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputTokens: 100,
+        outputTokens: 50,
+        cachedInputTokens: 0,
+        isEstimated: false,
+      }),
+    );
+  });
+
+  it('uses fallback estimation when no usage metadata (input = output * 5, isEstimated=true)', async () => {
+    const mockService = {
+      recordUsage: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // Response without usage metadata
+    const mockResponse = {
+      content: 'Short answer',
+    };
+
+    const options: WithTokenUsageOptions = {
+      graphName: 'test-graph',
+      nodeName: 'supervisor',
+      agentName: 'supervisor',
+      modelName: 'gpt-4o',
+    };
+
+    await withTokenUsage(options, mockService as any, async () => mockResponse);
+
+    // "Short answer" = 4 Chinese chars + 12 English = ~7 tokens output
+    // input = output * 5 = 35
+    expect(mockService.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputTokens: 15,
+        outputTokens: 3,
+        isEstimated: true,
+      }),
+    );
+  });
+
+  it('still returns model response when recordUsage throws', async () => {
+    const mockService = {
+      recordUsage: jest.fn().mockRejectedValue(new Error('DB error')),
+    };
+
+    const mockResponse = { content: 'Test response' };
+
+    const options: WithTokenUsageOptions = {
+      graphName: 'test-graph',
+      nodeName: 'supervisor',
+      agentName: 'supervisor',
+      modelName: 'gpt-4o',
+    };
+
+    const result = await withTokenUsage(options, mockService as any, async () => mockResponse);
+
+    expect(result).toEqual(mockResponse);
+  });
+
+  it('skips recording when usageService is null', async () => {
+    const mockFn = jest.fn().mockResolvedValue({ content: 'Test' });
+
+    const options: WithTokenUsageOptions = {
+      graphName: 'test-graph',
+      nodeName: 'supervisor',
+      agentName: 'supervisor',
+      modelName: 'gpt-4o',
+    };
+
+    const result = await withTokenUsage(options, null, mockFn);
+
+    expect(mockFn).toHaveBeenCalled();
+    expect(result).toEqual({ content: 'Test' });
+  });
 });

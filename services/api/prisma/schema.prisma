@@ -1,4 +1,4 @@
-generator client {
+﻿generator client {
   provider        = "prisma-client-js"
   output          = "./node_modules/@prisma/client"
   previewFeatures = ["postgresqlExtensions"]
@@ -74,6 +74,33 @@ model DocumentChunk {
   @@index([documentId])
 }
 
+model TokenUsage {
+  id                  String    @id @default(cuid())
+  conversationId      String?
+  messageId           String?
+  threadId            String?
+  graphName           String?   @db.VarChar(255)
+  nodeName            String?   @db.VarChar(255)
+  agentName           String    @db.VarChar(100)
+  modelConfigId       String?   @db.VarChar(255)
+  modelName           String?   @db.VarChar(100)
+  provider            String    @default("openai") @db.VarChar(50)
+  inputTokens         Int       @default(0)
+  outputTokens        Int       @default(0)
+  totalTokens         Int?
+  cachedInputTokens   Int       @default(0)
+  estimatedCostUsd    Float     @default(0)
+  isEstimated         Boolean   @default(false)
+  latencyMs           Int       @default(0)
+  overrideReason      String?
+  createdAt           DateTime  @default(now())
+
+  @@index([conversationId])
+  @@index([graphName, nodeName])
+  @@index([agentName])
+  @@index([modelConfigId])
+  @@index([createdAt])
+}
 enum MessageRole {
   system
   human
@@ -87,3 +114,4 @@ enum DocumentStatus {
   completed
   failed
 }
+
