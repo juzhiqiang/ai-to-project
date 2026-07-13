@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
 
 # Build artifacts
@@ -25,3 +25,7 @@ worktrees/
 
 # Logs
 *.log
+
+# Local logs / temporary test outputs (do not upload)
+tmp/local-artifacts/
+*.out.json
