@@ -44,6 +44,26 @@ test("home page links to the token cost estimator", () => {
   assert.match(pageSource, /Token Cost Estimator/);
 });
 
+test("home page links to the vector similarity playground", () => {
+  assert.match(pageSource, /href="\/vector-similarity"/);
+  assert.match(pageSource, /向量相似度/);
+});
+
+test("vector similarity page renders interactive similarity controls", () => {
+  const vectorSimilarityPagePath = new URL("./app/vector-similarity/page.tsx", import.meta.url);
+  assert.equal(existsSync(vectorSimilarityPagePath), true);
+
+  const pageSrc = readFileSync(vectorSimilarityPagePath, "utf8");
+
+  assert.match(pageSrc, /向量相似度可视化测试/);
+  assert.match(pageSrc, /cosineSimilarity/);
+  assert.match(pageSrc, /euclideanDistance/);
+  assert.match(pageSrc, /归一化后 cosine = dot/);
+  assert.match(pageSrc, /向量维度不匹配/);
+  assert.match(pageSrc, /id="vector-a"/);
+  assert.match(pageSrc, /id="vector-b"/);
+});
+
 test("critic refine route reuses the graph playground implementation", () => {
   assert.match(criticRefinePageSource, /analysis-graph\/page/);
 });
