@@ -85,6 +85,18 @@ export default function Home() {
             >
               向量相似度
             </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/rag-chunking"
+            >
+              文档切分测试
+            </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/vector-database"
+            >
+              向量数据库测试
+            </Link>
           </div>
         </header>
 

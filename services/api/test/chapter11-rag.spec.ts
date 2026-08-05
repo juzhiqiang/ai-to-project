@@ -58,6 +58,13 @@ import {
   type Chunk,
 } from '../rag/chunking/document-chunker';
 import { chunkParentChild, type ParentChildResult } from '../rag/chunking/parent-child-chunker';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  similaritySearch,
+  upsertChunks,
+  type PrismaRawClient,
+} from '../rag/retrieval/vector-store';
 
 describe('11.4 文档切分', () => {
   it('11.4.3 默认 chunkSize 500 切 1200 字文本得 3 个 chunk', async () => {
@@ -121,5 +128,158 @@ describe('11.4 文档切分', () => {
       // 子块内容必须是父块内容的子串
       expect(parent!.content.includes(child.content)).toBe(true);
     }
+  });
+});
+
+describe("11.5 向量数据库: 检索与存储", () => {
+  const records = Array.from({ length: 50 }, (_, index) => ({
+    id: `chunk-${index}`,
+    documentId: `document-${Math.floor(index / 5)}`,
+    content: `chunk ${index}`,
+    chunkIndex: index,
+    embedding: [1 + index / 100, (index % 7) / 10, (index % 3) / 10],
+    modelName: "test-embedding",
+  }));
+
+  it("11.5.2 小数据集 KNN baseline 与 ANN 前 K 结果一致", async () => {
+    const query = [1, 0.2, 0.1];
+    const baseline = records
+      .map((record) => ({
+        ...record,
+        score: cosineSimilarity(query, record.embedding),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+    const prisma = {
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([{ dimension: 3 }])
+        .mockResolvedValueOnce(baseline.map((row) => ({
+          id: row.id,
+          documentId: row.documentId,
+          content: row.content,
+          chunkIndex: row.chunkIndex,
+          modelName: row.modelName,
+          distance: 1 - row.score,
+        }))),
+    } as unknown as PrismaRawClient;
+
+    const ann = await similaritySearch(prisma, query, { topK: 5 });
+    expect(ann.map((row) => row.id)).toEqual(baseline.map((row) => row.id));
+  });
+
+  it("11.5.6 score 等于 1 减余弦距离", async () => {
+    const prisma = {
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([{ dimension: 3 }])
+        .mockResolvedValueOnce([{ ...records[0], distance: 0.25 }]),
+    } as unknown as PrismaRawClient;
+
+    const [result] = await similaritySearch(prisma, [1, 0, 0]);
+    expect(result.score).toBeCloseTo(0.75, 9);
+  });
+
+  it("upsert 拒绝空向量和批次内维度不一致", async () => {
+    const prisma = { $queryRaw: jest.fn() } as unknown as PrismaRawClient;
+    await expect(upsertChunks(prisma, [{ ...records[0], embedding: [] }])).rejects.toThrow(RangeError);
+    await expect(
+      upsertChunks(prisma, [records[0], { ...records[1], embedding: [1, 2] }]),
+    ).rejects.toThrow(RangeError);
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("HNSW 脚本启用 vector 扩展并配置索引参数", () => {
+    const sql = readFileSync(join(__dirname, "../scripts/create-hnsw-index.sql"), "utf8");
+    expect(sql).toMatch(/CREATE EXTENSION IF NOT EXISTS vector/i);
+    expect(sql).toMatch(/USING hnsw\s*\("embedding" vector_cosine_ops\)/i);
+    expect(sql).toMatch(/m\s*=\s*16/i);
+    expect(sql).toMatch(/ef_construction\s*=\s*64/i);
+  });
+
+  describe("cosineSimilarity", () => {
+    it("向量相同时返回 1", () => {
+      expect(cosineSimilarity([1, 2, 3], [1, 2, 3])).toBe(1);
+    });
+
+    it("向量维度不一致时抛出 RangeError", () => {
+      expect(() => cosineSimilarity([1, 2], [1, 2, 3])).toThrow(RangeError);
+    });
+
+    it("零向量返回 0", () => {
+      expect(cosineSimilarity([0, 0], [1, 2])).toBe(0);
+    });
+  });
+
+  describe("PrismaVectorDocumentRepository", () => {
+    it("upsert 会写入结构化字段并通过 raw SQL 写入向量", async () => {
+      const { PrismaVectorDocumentRepository } = await import("../rag/retrieval/vector-store");
+      const $queryRaw = jest.fn().mockResolvedValue([]);
+      const prisma = {
+        $queryRaw,
+        documentChunk: { upsert: jest.fn().mockResolvedValue({ id: "doc-1" }) },
+      };
+
+      const repo = new PrismaVectorDocumentRepository(prisma as never);
+      await repo.upsertDocument({
+        id: "doc-1",
+        sourceId: "11.md",
+        content: "真实切片内容",
+        embedding: [0.4, 0, 0],
+        modelName: "bge-small-zh-v1.5",
+      });
+
+      expect(prisma.documentChunk.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "doc-1" },
+          create: expect.objectContaining({
+            sourceId: "11.md",
+            content: "真实切片内容",
+            modelName: "bge-small-zh-v1.5",
+          }),
+        }),
+      );
+      expect($queryRaw).toHaveBeenCalled();
+    });
+
+    it("similaritySearch 使用余弦距离并返回重评分结果", async () => {
+      const { PrismaVectorDocumentRepository } = await import("../rag/retrieval/vector-store");
+      const $queryRaw = jest.fn()
+        .mockResolvedValueOnce([{ dimensions: 2 }])
+        .mockResolvedValueOnce([
+          { id: "doc-1", sourceId: "11.md", content: "性能优化技巧", score: 0.8, modelName: "m1" },
+          { id: "doc-2", sourceId: "11.md", content: "无关内容", score: 0.2, modelName: "m1" },
+        ]);
+
+      const prisma = { $queryRaw, documentChunk: { upsert: jest.fn() } };
+      const repo = new PrismaVectorDocumentRepository(prisma as never);
+      const results = await repo.similaritySearch([1, 0], { k: 1 });
+
+      expect($queryRaw).toHaveBeenCalledTimes(2);
+      expect(results).toEqual([
+        { id: "doc-1", sourceId: "11.md", content: "性能优化技巧", score: 0.8, modelName: "m1" },
+      ]);
+    });
+
+    it("dimension mismatch 时直接抛错并提示维度", async () => {
+      const { PrismaVectorDocumentRepository } = await import("../rag/retrieval/vector-store");
+      const $queryRaw = jest.fn().mockResolvedValueOnce([{ dimensions: 384 }]);
+      const prisma = { $queryRaw, documentChunk: { upsert: jest.fn() } };
+      const repo = new PrismaVectorDocumentRepository(prisma as never);
+
+      await expect(repo.similaritySearch([0.1, 0.2, 0.3], { k: 1 })).rejects.toThrow(/384/);
+    });
+  });
+
+  describe("HNSW 索引 SQL", () => {
+    it("提供符合任务参数要求的索引脚本", async () => {
+      const { readFileSync } = await import("node:fs");
+      const path = await import("node:path");
+      const scriptPath = path.resolve(__dirname, "../scripts/create-hnsw-index.sql");
+      const sql = readFileSync(scriptPath, "utf8");
+
+      expect(sql).toContain("USING hnsw");
+      expect(sql).toContain("vector_cosine_ops");
+      expect(sql).toContain("m = 16");
+      expect(sql).toContain("ef_construction = 64");
+    });
   });
 });

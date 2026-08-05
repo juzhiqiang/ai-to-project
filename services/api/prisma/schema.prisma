@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  output          = "./node_modules/@prisma/client"
+  output          = "../node_modules/.prisma/client"
   previewFeatures = ["postgresqlExtensions"]
 }
 
@@ -68,6 +68,7 @@ model DocumentChunk {
   chunkIndex Int
   metadata   Json?
   embedding  Unsupported("vector(384)")?
+  modelName  String                     @default("unknown")
   createdAt  DateTime                   @default(now())
 
   @@unique([documentId, chunkIndex])

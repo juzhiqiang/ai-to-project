@@ -338,3 +338,64 @@ test("budget-policy.ts has no import of PrismaClient or external DB", () => {
   assert.doesNotMatch(source, /import.*PrismaClient/);
   assert.doesNotMatch(source, /import.*@prisma/);
 });
+
+// 9.2 RAG Chunking
+test("home page links to the RAG chunking playground", () => {
+  assert.match(pageSource, /href="\/rag-chunking"/);
+  assert.match(pageSource, /文档切分测试/);
+});
+
+test("RAG chunking page exists and renders controls", () => {
+  const ragChunkPath = new URL("./app/rag-chunking/page.tsx", import.meta.url);
+  assert.equal(existsSync(ragChunkPath), true);
+
+  const pageSrc = readFileSync(ragChunkPath, "utf8");
+  assert.match(pageSrc, /文档切分测试/);
+  assert.match(pageSrc, /chunkSize/);
+  assert.match(pageSrc, /chunkOverlap/);
+  assert.match(pageSrc, /parent-child/);
+  assert.match(pageSrc, /fetch\("\/api\/rag\/chunk"[\s\S]*method:\s*"POST"/);
+});
+
+test("web owns an explicit RAG chunk proxy route with error handling", () => {
+  const ragChunkRoutePath = new URL("./app/api/rag/chunk/route.ts", import.meta.url);
+  assert.equal(existsSync(ragChunkRoutePath), true);
+
+  const routeSrc = readFileSync(ragChunkRoutePath, "utf8");
+  assert.match(routeSrc, /API_ORIGIN/);
+  assert.match(routeSrc, /\/api\/rag\/chunk/);
+  assert.match(routeSrc, /status:\s*502/);
+});
+
+// 9.3 Vector Database
+test("home page links to the vector database playground", () => {
+  assert.match(pageSource, /href="\/vector-database"/);
+  assert.match(pageSource, /向量数据库测试/);
+});
+
+test("vector database page renders retrieval controls and result scores", () => {
+  const vectorDatabasePath = new URL("./app/vector-database/page.tsx", import.meta.url);
+  assert.equal(existsSync(vectorDatabasePath), true);
+
+  const pageSrc = readFileSync(vectorDatabasePath, "utf8");
+  assert.match(pageSrc, /向量数据库测试/);
+  assert.match(pageSrc, /query/);
+  assert.match(pageSrc, /topK/);
+  assert.match(pageSrc, /modelName/);
+  assert.match(pageSrc, /result\.score|hit\.score/);
+  assert.match(pageSrc, /dimension/);
+  assert.match(pageSrc, /count/);
+  assert.match(pageSrc, /chunkIndex/);
+  assert.match(pageSrc, /fetch\("\/api\/rag\/search"/);
+});
+
+test("web owns an explicit RAG search proxy route with error handling", () => {
+  const ragSearchRoutePath = new URL("./app/api/rag/search/route.ts", import.meta.url);
+  assert.equal(existsSync(ragSearchRoutePath), true);
+
+  const routeSrc = readFileSync(ragSearchRoutePath, "utf8");
+  assert.match(routeSrc, /API_ORIGIN/);
+  assert.match(routeSrc, /\/api\/rag\/search/);
+  assert.match(routeSrc, /Backend RAG search request failed/);
+  assert.match(routeSrc, /status:\s*502/);
+});
