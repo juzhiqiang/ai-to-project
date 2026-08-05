@@ -62,10 +62,10 @@ export default function VectorDatabasePage() {
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-4 border-b border-zinc-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">RAG · 11.5</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">9.4 pgvector</p>
             <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">向量数据库测试</h1>
             <p className="max-w-3xl text-sm leading-6 text-zinc-600">
-              输入自然语言查询，由后端生成 embedding 后执行 pgvector 余弦近邻检索。
+              只读仓储检索测试：由后端生成 embedding 后执行 pgvector 余弦近邻检索。
             </p>
           </div>
           <Link

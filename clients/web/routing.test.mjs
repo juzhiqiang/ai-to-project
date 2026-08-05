@@ -389,6 +389,14 @@ test("vector database page renders retrieval controls and result scores", () => 
   assert.match(pageSrc, /fetch\("\/api\/rag\/search"/);
 });
 
+test("9.4 pgvector repository page is a read-only retrieval playground", () => {
+  const vectorDatabasePath = new URL("./app/vector-database/page.tsx", import.meta.url);
+  const pageSrc = readFileSync(vectorDatabasePath, "utf8");
+  assert.match(pageSrc, /9\.4 pgvector/);
+  assert.match(pageSrc, /只读/);
+  assert.doesNotMatch(pageSrc, /upsert/i);
+});
+
 test("web owns an explicit RAG search proxy route with error handling", () => {
   const ragSearchRoutePath = new URL("./app/api/rag/search/route.ts", import.meta.url);
   assert.equal(existsSync(ragSearchRoutePath), true);
