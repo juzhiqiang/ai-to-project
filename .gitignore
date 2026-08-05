@@ -28,4 +28,6 @@ worktrees/
 
 # Local logs / temporary test outputs (do not upload)
 tmp/local-artifacts/
+.tmp/
+.codex-tool-sentinels/
 *.out.json
