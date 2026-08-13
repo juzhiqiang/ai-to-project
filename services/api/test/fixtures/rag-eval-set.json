@@ -1,0 +1,27 @@
+[
+  {
+    "question": "什么是向量数据库？",
+    "expectedDocIds": ["doc-vector-1", "doc-vector-2"],
+    "groundTruth": "向量数据库是一种专门存储和检索高维向量的数据库，常用于语义搜索和 RAG 系统。"
+  },
+  {
+    "question": "余弦相似度如何计算？",
+    "expectedDocIds": ["doc-cosine-1"],
+    "groundTruth": "余弦相似度通过计算两个向量夹角的余弦值来衡量相似程度，公式为 a·b / (‖a‖·‖b‖)。"
+  },
+  {
+    "question": "RAG 的评测指标有哪些？",
+    "expectedDocIds": ["doc-metrics-1", "doc-metrics-2", "doc-metrics-3"],
+    "groundTruth": "检索层常用 Recall@K、MRR、NDCG@K；生成层常用 RAGAS 的 faithfulness、answer relevancy 等指标。"
+  },
+  {
+    "question": "什么是 Parent-Child 切分？",
+    "expectedDocIds": ["doc-parent-child-1"],
+    "groundTruth": "Parent-Child 切分将文档按粒度拆分为父块和子块，检索用子块提升精度，返回时映射到父块提供更完整上下文。"
+  },
+  {
+    "question": "HNSW 索引的核心参数有哪些？",
+    "expectedDocIds": ["doc-hnsw-1", "doc-hnsw-2"],
+    "groundTruth": "HNSW 索引核心参数包括 m（每层最大连接数）和 ef_construction（构建时候选列表大小）。"
+  }
+]

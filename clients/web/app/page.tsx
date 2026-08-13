@@ -93,11 +93,17 @@ export default function Home() {
             </Link>
             <Link
               className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-              href="/vector-database"
+             href="/vector-database"
+           >
+             向量数据库测试
+           </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/rag-evaluation"
             >
-              向量数据库测试
+              检索评测指标
             </Link>
-          </div>
+         </div>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">

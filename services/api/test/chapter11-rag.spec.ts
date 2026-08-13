@@ -283,3 +283,104 @@ describe("11.5 向量数据库: 检索与存储", () => {
     });
   });
 });
+
+describe('11.7 评估', () => {
+  it('11.7.1 Recall@K = 1 当所有 relevant 都在 Top-K', () => {
+    const { recallAtK } = require('../rag/evaluation/retrieval-metrics');
+    const retrieved = ['doc-a', 'doc-b', 'doc-c'];
+    const relevant = ['doc-a', 'doc-b'];
+    expect(recallAtK(retrieved, relevant, 3)).toBe(1);
+  });
+
+  it('11.7.1 Recall@K 在 Top-K 不足时按比例计算', () => {
+    const { recallAtK } = require('../rag/evaluation/retrieval-metrics');
+    const retrieved = ['doc-a', 'doc-x', 'doc-b'];
+    const relevant = ['doc-a', 'doc-b'];
+    expect(recallAtK(retrieved, relevant, 1)).toBeCloseTo(0.5, 9);
+    expect(recallAtK(retrieved, relevant, 3)).toBe(1);
+  });
+
+  it('11.7.1 MRR 第一个相关在第 1 位 → 1.0', () => {
+    const { mrr } = require('../rag/evaluation/retrieval-metrics');
+    const ranked = [['doc-a', 'doc-b']];
+    const relevant = [['doc-a']];
+    expect(mrr(ranked, relevant)).toBe(1);
+  });
+
+  it('11.7.1 MRR 第一个相关在第 2 位 → 0.5', () => {
+    const { mrr } = require('../rag/evaluation/retrieval-metrics');
+    const ranked = [['doc-x', 'doc-a']];
+    const relevant = [['doc-a']];
+    expect(mrr(ranked, relevant)).toBe(0.5);
+  });
+
+  it('11.7.1 MRR 多查询取平均', () => {
+    const { mrr } = require('../rag/evaluation/retrieval-metrics');
+    const ranked = [['doc-a', 'doc-b'], ['doc-x', 'doc-a']];
+    const relevant = [['doc-a'], ['doc-a']];
+    expect(mrr(ranked, relevant)).toBeCloseTo(0.75, 9);
+  });
+
+  it('11.7.1 NDCG@K 单个完全命中 = 1.0', () => {
+    const { ndcgAtK } = require('../rag/evaluation/retrieval-metrics');
+    const retrieved = ['doc-a', 'doc-b'];
+    const relevant = ['doc-a'];
+    expect(ndcgAtK(retrieved, relevant, 5)).toBe(1);
+  });
+
+  it('11.7.1 NDCG@K 相关文档排得越靠后得分越低', () => {
+    const { ndcgAtK } = require('../rag/evaluation/retrieval-metrics');
+    const retrieved = ['doc-x', 'doc-a'];
+    const relevant = ['doc-a'];
+    const score = ndcgAtK(retrieved, relevant, 5);
+    expect(score).toBeGreaterThan(0);
+    expect(score).toBeLessThan(1);
+    expect(score).toBeCloseTo(1 / Math.log2(3), 9);
+  });
+
+  it('11.7.3 ragas-runner 在 RAGAS 不可用时返回 null + warn，不抛错', async () => {
+    const { runRagasEvaluation } = require('../rag/evaluation/ragas-runner');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchFn = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const result = await runRagasEvaluation(
+      { samples: [], metrics: ['faithfulness'] },
+      { fetchFn: fetchFn as never, maxRetries: 3, retryDelayMs: 0 },
+    );
+    expect(result).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('RAGAS 评测服务不可用'));
+    warnSpy.mockRestore();
+  });
+
+  it('11.7.3 ragas-runner 服务正常时返回指标分数', async () => {
+    const { runRagasEvaluation } = require('../rag/evaluation/ragas-runner');
+    const fetchFn = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ faithfulness: 0.92, answer_relevancy: 0.85 }),
+    });
+    const result = await runRagasEvaluation(
+      {
+        samples: [{ question: 'q', answer: 'a', contexts: ['c'], ground_truth: 'g' }],
+        metrics: ['faithfulness', 'answer_relevancy'],
+      },
+      { fetchFn: fetchFn as never },
+    );
+    expect(result).toEqual({ faithfulness: 0.92, answer_relevancy: 0.85 });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('11.7.3 ragas-runner HTTP 错误也触发重试后降级', async () => {
+    const { runRagasEvaluation } = require('../rag/evaluation/ragas-runner');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchFn = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+    const result = await runRagasEvaluation(
+      { samples: [], metrics: [] },
+      { fetchFn: fetchFn as never, maxRetries: 3, retryDelayMs: 0 },
+    );
+    expect(result).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});

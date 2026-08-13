@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RagChunkController } from './rag/rag-chunk.controller';
 import { RagSearchController } from './rag/rag-search.controller';
+import { RagEvaluationController } from './rag/rag-evaluation.controller';
 import { AgentsController } from './agents/agents.controller';
 import { TokenEstimatorController } from './cost/token-estimator.controller';
 import { OrchestratorService } from './agents/orchestrator.service';
@@ -28,6 +29,7 @@ import { UIProtocolModule } from './ui-protocol/ui-protocol.module';
     TokenEstimatorController,
     RagChunkController,
     RagSearchController,
+    RagEvaluationController,
   ],
   providers: [
     LlmService,
