@@ -5,11 +5,13 @@ import {
   similaritySearch,
   type PrismaDbClient,
 } from "../../../rag/retrieval/vector-store";
+import { hybridSearch } from "../../../rag/retrieval/hybrid-search";
 
 type RagSearchBody = {
   query?: string;
   topK?: number;
   modelName?: string;
+  mode?: "hybrid" | "vector";
 };
 
 @Controller("api/rag")
@@ -36,15 +38,23 @@ export class RagSearchController {
     }
 
     const vector = await this.embeddingService.embedQuery(query);
+    const mode = body.mode ?? "hybrid";
 
     try {
-      const results = await similaritySearch(this.searchClient, vector, {
-        topK,
-        modelName: body.modelName,
-      });
+      const results =
+        mode === "vector"
+          ? await similaritySearch(this.searchClient, vector, {
+              topK,
+              modelName: body.modelName,
+            })
+          : await hybridSearch(this.searchClient, query, vector, {
+              topK,
+              modelName: body.modelName,
+            });
 
       return {
         query,
+        mode,
         dimension: vector.length,
         count: results.length,
         results,

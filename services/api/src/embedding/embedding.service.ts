@@ -3,7 +3,9 @@ import { HuggingFaceTransformersEmbeddings } from '@langchain/community/embeddin
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { PrismaService } from '../prisma/prisma.service';
 
-export const EMBEDDING_MODEL_NAME = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
+export const EMBEDDING_MODEL_NAME = 'Xenova/bge-small-zh-v1.5';
+// bge-v1.5 检索规范：query 侧加指令前缀，passage（文档）侧不加，可显著提升中文检索相关性。
+export const BGE_QUERY_PREFIX = '为这个句子生成表示以用于检索相关文章：';
 const EMBED_BATCH_SIZE = 16;
 
 @Injectable()
@@ -17,7 +19,7 @@ export class EmbeddingService {
   }
 
   embedQuery(text: string): Promise<number[]> {
-    return this.embeddings.embedQuery(text);
+    return this.embeddings.embedQuery(BGE_QUERY_PREFIX + text);
   }
 
   async embedChunks(documentId: string): Promise<{ embedded: number }> {
@@ -41,8 +43,9 @@ export class EmbeddingService {
       await Promise.all(
         batch.map((chunk, idx) =>
           this.prisma.$executeRawUnsafe(
-            `UPDATE "DocumentChunk" SET embedding = $1::vector WHERE id = $2`,
+            `UPDATE "DocumentChunk" SET embedding = $1::vector, "modelName" = $2 WHERE id = $3`,
             toVectorLiteral(vectors[idx]),
+            EMBEDDING_MODEL_NAME,
             chunk.id,
           ),
         ),

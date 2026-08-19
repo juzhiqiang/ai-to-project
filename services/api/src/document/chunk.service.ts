@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { DEFAULT_SEPARATORS } from '../../rag/chunking/document-chunker';
 import { ParserFactory } from './parsers/parser.factory';
 import { EmbeddingService } from '../embedding/embedding.service';
 import { SseService } from '../sse/sse.service';
@@ -49,10 +50,13 @@ export class ChunkService {
       const parser = ParserFactory.getParser(document.mimeType);
       const text = await parser.parse(filePath);
 
-      // 3. 用 TextSplitter 切分
+      // 3. 提取标题 + 用中文优先分隔符切分（调大 chunkSize，减少主题被硬拆）
+      const title = text.match(/^#\s*(.+)$/m)?.[1]?.trim();
+
       const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 500,
-        chunkOverlap: 50,
+        chunkSize: 800,
+        chunkOverlap: 120,
+        separators: DEFAULT_SEPARATORS,
       });
 
       const chunkedDocs = await splitter.createDocuments([text]);
@@ -78,7 +82,7 @@ export class ChunkService {
             `,
             randomUUID(),
             documentId,
-            chunk.pageContent,
+            title && index > 0 ? `# ${title}\n${chunk.pageContent}` : chunk.pageContent,
             index,
             JSON.stringify(chunk.metadata ?? {}),
           ),

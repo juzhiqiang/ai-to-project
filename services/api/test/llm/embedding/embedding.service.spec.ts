@@ -1,4 +1,8 @@
-import { EmbeddingService, EMBEDDING_MODEL_NAME } from '../../../src/llm/embedding/embedding.service';
+import {
+  EmbeddingService,
+  EMBEDDING_MODEL_NAME,
+  BGE_QUERY_PREFIX,
+} from '../../../src/llm/embedding/embedding.service';
 
 class FakeEmbeddings {
   public readonly embedQuery = jest.fn(async () => [0.1, 0.2, 0.3]);
@@ -8,8 +12,8 @@ class FakeEmbeddings {
 }
 
 describe('EmbeddingService', () => {
-  it('uses the multilingual MiniLM model name for local embeddings', () => {
-    expect(EMBEDDING_MODEL_NAME).toBe('Xenova/paraphrase-multilingual-MiniLM-L12-v2');
+  it('uses the bge-small-zh-v1.5 model name for local embeddings', () => {
+    expect(EMBEDDING_MODEL_NAME).toBe('Xenova/bge-small-zh-v1.5');
   });
 
   it('delegates embedQuery and embedDocuments to the configured embeddings runtime', async () => {
@@ -22,7 +26,8 @@ describe('EmbeddingService', () => {
       [2, 3, 4],
     ]);
 
-    expect(embeddings.embedQuery).toHaveBeenCalledWith('退货政策');
+    // query 侧加 bge 检索指令前缀，passage 侧不加
+    expect(embeddings.embedQuery).toHaveBeenCalledWith(`${BGE_QUERY_PREFIX}退货政策`);
     expect(embeddings.embedDocuments).toHaveBeenCalledWith(['退货政策', '售后 FAQ']);
   });
 });

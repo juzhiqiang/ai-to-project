@@ -1,6 +1,6 @@
 llm:
   provider: openai
-  model: gpt-5.5
+  model: deepseek-v4-flash
   temperature: 0
   maxTokens: 4096
 retrieval:

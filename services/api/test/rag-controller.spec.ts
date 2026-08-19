@@ -66,10 +66,10 @@ describe('RAG controllers', () => {
     };
     const controller = new RagSearchController(embeddingService as never, prisma as never);
 
-    const result = await controller.search({ query: '退款规则', topK: 3 });
+    const result = await controller.search({ query: '退款规则', topK: 3, mode: 'vector' });
 
     expect(embeddingService.embedQuery).toHaveBeenCalledWith('退款规则');
-    expect(result).toMatchObject({ query: '退款规则', dimension: 3, count: 1 });
+    expect(result).toMatchObject({ query: '退款规则', mode: 'vector', dimension: 3, count: 1 });
     expect(result.results[0].score).toBeCloseTo(0.9, 9);
   });
 

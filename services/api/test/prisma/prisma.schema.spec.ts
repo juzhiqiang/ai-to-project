@@ -132,7 +132,7 @@ describe('Prisma schema', () => {
     expect(chunk).toContain('content    String');
     expect(chunk).toContain('chunkIndex Int');
     expect(chunk).toContain('metadata   Json?');
-    expect(chunk).toContain('embedding  Unsupported("vector(384)")');
+    expect(chunk).toContain('embedding  Unsupported("vector(512)")');
     expect(chunk).toMatch(/createdAt\s+DateTime\s+@default\(now\(\)\)/);
 
     expect(status).toContain('pending');

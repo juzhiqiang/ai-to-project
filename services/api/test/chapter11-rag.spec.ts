@@ -384,3 +384,96 @@ describe('11.7 评估', () => {
     warnSpy.mockRestore();
   });
 });
+
+import { createRagTool, RAG_TOOL_DESCRIPTION } from '../rag/agent/rag-tool';
+import type {
+  BudgetPolicyInput,
+  BudgetPolicyResult,
+} from '../src/llm/cost/budget-policy';
+import type { RagAnswer } from '../rag/pipeline/rag-pipeline';
+
+describe('11.10 集成 Agent', () => {
+  function makeMockRagAnswer(overrides?: Partial<RagAnswer>): RagAnswer {
+    return {
+      answer: '签收后 7 天内可申请无理由退货。',
+      citations: [
+        {
+          id: 'doc-refund',
+          documentId: 'doc-1',
+          content: '退货政策：签收后 7 天内商品完好可申请退货。',
+          chunkIndex: 0,
+          score: 0.92,
+        },
+      ],
+      generated: true,
+      ...overrides,
+    };
+  }
+
+  it('11.10.1 预算 allow 时工具调用返回的 JSON.parse 含 answer / citations', async () => {
+    const ragAsk = jest.fn().mockResolvedValue(makeMockRagAnswer());
+    const allowBudget = (): BudgetPolicyResult => ({
+      action: 'allow',
+      reason: 'budget OK (50%)',
+    });
+
+    const ragTool = createRagTool({
+      ragAsk,
+      budgetInput: {
+        budgetUsedPercent: 50,
+        agentName: 'functional_expert',
+      },
+      resolveBudgetAction: allowBudget,
+    });
+
+    const raw = await ragTool.invoke({ question: '退货政策是什么？', topK: 4 });
+    const parsed = JSON.parse(raw);
+
+    expect(parsed.answer).toBe('签收后 7 天内可申请无理由退货。');
+    expect(Array.isArray(parsed.citations)).toBe(true);
+    expect(parsed.citations).toHaveLength(1);
+    expect(parsed.citations[0].id).toBe('doc-refund');
+    expect(ragAsk).toHaveBeenCalledWith('退货政策是什么？', 4);
+  });
+
+  it('11.10.1 预算 reject 时返回 error: budget_exceeded 且不调用 ragAsk', async () => {
+    const ragAsk = jest.fn().mockResolvedValue(makeMockRagAnswer());
+    const rejectBudget = (): BudgetPolicyResult => ({
+      action: 'reject',
+      reason: 'budget exceeded (120%)',
+    });
+
+    const ragTool = createRagTool({
+      ragAsk,
+      budgetInput: {
+        budgetUsedPercent: 120,
+        agentName: 'functional_expert',
+      },
+      resolveBudgetAction: rejectBudget,
+    });
+
+    const raw = await ragTool.invoke({ question: '退货政策是什么？' });
+    const parsed = JSON.parse(raw);
+
+    expect(parsed.error).toBe('budget_exceeded');
+    expect(parsed.reason).toContain('budget exceeded');
+    // reject 时预算检查在最前面，不应调用昂贵的 ragAsk
+    expect(ragAsk).not.toHaveBeenCalled();
+  });
+
+  it('11.10.2 tool 的 description 包含"不适用"关键词，避免闲聊场景误调用', () => {
+    expect(RAG_TOOL_DESCRIPTION).toContain('不适用');
+    const ragTool = createRagTool({
+      ragAsk: jest.fn(),
+      budgetInput: {
+        budgetUsedPercent: 0,
+        agentName: 'functional_expert',
+      },
+      resolveBudgetAction: (): BudgetPolicyResult => ({
+        action: 'allow',
+        reason: 'ok',
+      }),
+    });
+    expect(ragTool.description).toContain('不适用');
+  });
+});

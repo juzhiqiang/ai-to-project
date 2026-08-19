@@ -1,4 +1,25 @@
 import { resolve } from "node:path";
+
+/**
+ * ── 9.6 / 11.10 RAG Tool 接入示例（文档说明，不表示主图已经集成）──────────────
+ *
+ * 如需把 RAG 知识库检索能力接入 Functional Expert 的工具池，按以下方式使用：
+ *
+ *   import { createRagTool } from "../../../rag/agent/rag-tool";
+ *
+ *   // 1. 构造真实或 mock 的 ragAsk（见 rag/pipeline/rag-pipeline.ts）
+ *   // 2. 用预算入参创建工具
+ *   const ragTool = createRagTool({
+ *     ragAsk,
+ *     budgetInput: { budgetUsedPercent, agentName: "functional_expert" },
+ *   });
+ *   // 3. 把 ragTool 追加到 createFunctionalExpert 接收的 tools 列表中
+ *   //    （注意：createRagTool 返回的是 StructuredTool，可直接与 analysis-tools 拼接）
+ *
+ * 该工具内部会先做预算检查（reject → { error: 'budget_exceeded' }），
+ * 再调用 ragAsk，返回 JSON.stringify 后的 { answer, citations }。
+ * description 中写明了"不适用"场景，避免 LLM 在闲聊时误调用。
+ */
 import {
   AIMessage,
   HumanMessage,

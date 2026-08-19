@@ -31,3 +31,6 @@ tmp/local-artifacts/
 .tmp/
 .codex-tool-sentinels/
 *.out.json
+
+# Runtime user-uploaded files (seed test docs are copied here at ingest time)
+uploads/

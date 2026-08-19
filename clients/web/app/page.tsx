@@ -99,11 +99,17 @@ export default function Home() {
            </Link>
             <Link
               className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-              href="/rag-evaluation"
+             href="/rag-evaluation"
+           >
+             检索评测指标
+           </Link>
+            <Link
+              className="inline-flex w-fit items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              href="/rag-agent"
             >
-              检索评测指标
+              RAG 工具集成
             </Link>
-         </div>
+        </div>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">

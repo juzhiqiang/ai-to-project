@@ -21,7 +21,7 @@ describe('EmbeddingService', () => {
     jest.clearAllMocks();
   });
 
-  it('uses the multilingual MiniLM model for pgvector embeddings', () => {
+  it('uses the bge-small-zh-v1.5 model for pgvector embeddings', () => {
     new EmbeddingService({} as any);
 
     expect(HuggingFaceTransformersEmbeddings).toHaveBeenCalledWith({
@@ -54,14 +54,16 @@ describe('EmbeddingService', () => {
     ]);
     expect(prisma.$executeRawUnsafe).toHaveBeenNthCalledWith(
       1,
-      'UPDATE "DocumentChunk" SET embedding = $1::vector WHERE id = $2',
+      'UPDATE "DocumentChunk" SET embedding = $1::vector, "modelName" = $2 WHERE id = $3',
       '[0.1,0.2]',
+      EMBEDDING_MODEL_NAME,
       'chunk-1',
     );
     expect(prisma.$executeRawUnsafe).toHaveBeenNthCalledWith(
       2,
-      'UPDATE "DocumentChunk" SET embedding = $1::vector WHERE id = $2',
+      'UPDATE "DocumentChunk" SET embedding = $1::vector, "modelName" = $2 WHERE id = $3',
       '[0.3,0.4]',
+      EMBEDDING_MODEL_NAME,
       'chunk-2',
     );
   });
