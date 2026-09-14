@@ -1,0 +1,24 @@
+{
+  "name": "@repo/mcp-server",
+  "version": "0.0.1",
+  "description": "需求分析 MCP Server：复杂度评估、需求冲突检测、User Story 生成",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "catalog:"
+  }
+}
