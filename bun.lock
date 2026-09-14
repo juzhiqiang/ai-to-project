@@ -28,6 +28,21 @@
         "typescript": "^5",
       },
     },
+    "mcp-servers/web-search": {
+      "name": "@repo/mcp-web-search",
+      "version": "0.0.1",
+      "bin": {
+        "web-search-mcp": "dist/index.js",
+      },
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.30.0",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "catalog:",
+      },
+    },
     "packages/contracts": {
       "name": "@repo/contracts",
       "dependencies": {
@@ -571,6 +586,8 @@
     "@repo/contracts": ["@repo/contracts@workspace:packages/contracts"],
 
     "@repo/mcp-server": ["@repo/mcp-server@workspace:services/mcp-server"],
+
+    "@repo/mcp-web-search": ["@repo/mcp-web-search@workspace:mcp-servers/web-search"],
 
     "@repo/web": ["@repo/web@workspace:clients/web"],
 
